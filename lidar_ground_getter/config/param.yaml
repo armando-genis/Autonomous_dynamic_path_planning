@@ -1,0 +1,10 @@
+lidar_ground_node:
+  ros__parameters:
+    treshold_ground_: 0.15 #this is for the oldest version of ground getter called LidarGround.cpp
+    num_seg_: 1
+    num_iter_: 8
+    num_lpr_: 400
+    th_seeds_: 0.3
+    th_dist_: 0.3
+    sensor_height_: 1.93
+

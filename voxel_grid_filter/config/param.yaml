@@ -1,0 +1,16 @@
+voxel_grid_filter:
+  ros__parameters:
+    voxel_condition: true
+    roi_max_x_: 10.0
+    roi_max_y_: 8.0
+    roi_max_z_: 0.5
+    roi_min_x_: -2.5
+    roi_min_y_: -8.0
+    roi_min_z_: -2.5
+    voxel_leaf_size_x: 0.1
+    voxel_leaf_size_y: 0.1
+    voxel_leaf_size_z: 0.1
+
+
+
+

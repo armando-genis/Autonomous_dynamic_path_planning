@@ -1,0 +1,28 @@
+lidar_ground_node:
+  ros__parameters:
+    treshold_ground_: 0.15 #this is for the oldest version of ground getter called LidarGround.cpp
+    num_seg_: 1
+    num_iter_: 8
+    num_lpr_: 400
+    th_seeds_: 0.3
+    th_dist_: 0.3
+    sensor_height_: 1.93
+
+
+voxel_grid_filter:
+  ros__parameters:
+    voxel_condition: true
+    roi_max_x_: 10.0
+    roi_max_y_: 8.0
+    roi_max_z_: 0.5
+    roi_min_x_: -2.5
+    roi_min_y_: -8.0
+    roi_min_z_: -2.5
+    voxel_leaf_size_x: 0.1
+    voxel_leaf_size_y: 0.1
+    voxel_leaf_size_z: 0.1
+
+
+
+
+
