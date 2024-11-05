@@ -72,7 +72,7 @@ install(
 )
 
 message(=============================================================)
-message("-- ROS Found. ROS Support is turned ON.")
+message("-- ROS Found. ROS Support is turned ON for pointcloud_clustering_node.")
 message(=============================================================)
 
 ament_package()

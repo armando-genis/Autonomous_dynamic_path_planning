@@ -44,9 +44,8 @@ private:
     double IOU_THRESH;
     bool USE_TRACKING;
 
-    vector<std::vector<geometry_msgs::msg::Point>> hull_vector;
-
     std::shared_ptr<lidar_obstacle_detector::ObstacleDetector<pcl::PointXYZ>> obstacle_detector;
+    obstacles_information_msgs::msg::ObstacleCollection obstacle_collection;
 
     // Point Cloud callback
     void pointCloudCallback(const sensor_msgs::msg::PointCloud2::SharedPtr msg);
@@ -55,6 +54,7 @@ private:
     // subscriber & publisher
     rclcpp::Subscription<sensor_msgs::msg::PointCloud2>::SharedPtr sub_points_cloud_;
     rclcpp::Publisher<visualization_msgs::msg::MarkerArray>::SharedPtr hull_publisher_;
+    rclcpp::Publisher<obstacles_information_msgs::msg::ObstacleCollection>::SharedPtr obstacle_info_publisher_;
 
 public:
     pointcloud_clustering_node(/* args */);

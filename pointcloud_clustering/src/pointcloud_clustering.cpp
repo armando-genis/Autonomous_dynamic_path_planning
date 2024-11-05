@@ -25,6 +25,7 @@ pointcloud_clustering_node::pointcloud_clustering_node(/* args */) : Node("point
     // Create subscriber
     sub_points_cloud_ = this->create_subscription<sensor_msgs::msg::PointCloud2>("/ground_removal", 10, std::bind(&pointcloud_clustering_node::pointCloudCallback, this, std::placeholders::_1));
     hull_publisher_ = this->create_publisher<visualization_msgs::msg::MarkerArray>("/hull_marker", 10);
+    obstacle_info_publisher_ = this->create_publisher<obstacles_information_msgs::msg::ObstacleCollection>("/obstacle_info", 10);
 
     // Create point processor
     obstacle_detector = std::make_shared<lidar_obstacle_detector::ObstacleDetector<pcl::PointXYZ>>();
@@ -67,7 +68,7 @@ void pointcloud_clustering_node::pointCloudCallback(const sensor_msgs::msg::Poin
 
         if (!clusters.empty())
         {
-            std::cout << green << "Number of clusters: " << clusters.size() << reset << std::endl;
+            // std::cout << green << "Number of clusters: " << clusters.size() << reset << std::endl;
             convex_hull(clusters);
         }
     }
@@ -78,13 +79,17 @@ void pointcloud_clustering_node::pointCloudCallback(const sensor_msgs::msg::Poin
 
     auto end_time = std::chrono::system_clock::now();
     auto duration = std::chrono::duration_cast<std::chrono::milliseconds>(end_time - init_time).count();
-    cout << blue << "Execution time: " << duration << " ms" << reset << endl;
+    // cout << blue << "Execution time: " << duration << " ms" << reset << endl;
 }
 
 void pointcloud_clustering_node::convex_hull(std::vector<pcl::PointCloud<pcl::PointXYZ>::Ptr> cloud_clusters)
 {
-    hull_vector.resize(cloud_clusters.size());
     visualization_msgs::msg::MarkerArray hull_markers;
+    obstacle_collection.obstacles.clear();
+
+    obstacle_collection.header.stamp = rclcpp::Clock{}.now();
+    obstacle_collection.header.frame_id = "velodyne";
+
     int index = 0; // Declare an index variable
     for (auto &cluster : cloud_clusters)
     {
@@ -102,17 +107,34 @@ void pointcloud_clustering_node::convex_hull(std::vector<pcl::PointCloud<pcl::Po
         if (hull.getDimension() == 2)
         {
             std::vector<geometry_msgs::msg::Point> hull_points;
+            obstacles_information_msgs::msg::Obstacle obstacle;
+            geometry_msgs::msg::Polygon polygon;
+
             for (const auto &point : convexHull->points)
             {
-                geometry_msgs::msg::Point p;
+                geometry_msgs::msg::Point32 p;
                 p.x = point.x;
                 p.y = point.y;
                 p.z = 0.0;
-                hull_points.push_back(p);
+                polygon.points.push_back(p);
+
+                geometry_msgs::msg::Point hull_point;
+                hull_point.x = p.x;
+                hull_point.y = p.y;
+                hull_point.z = p.z;
+                hull_points.push_back(hull_point);
             }
 
             // Close the loop
             hull_points.push_back(hull_points.front());
+            polygon.points.push_back(polygon.points.front());
+
+            obstacle.polygon = polygon;
+            obstacle.id = index;
+            obstacle.type = "NONE";
+
+            obstacle_collection.obstacles.push_back(obstacle);
+
             // Create a marker for the convex hull
             visualization_msgs::msg::Marker hull_marker;
             hull_marker.header.frame_id = "velodyne";
@@ -135,6 +157,7 @@ void pointcloud_clustering_node::convex_hull(std::vector<pcl::PointCloud<pcl::Po
         if (!hull_markers.markers.empty())
         {
             hull_publisher_->publish(hull_markers);
+            obstacle_info_publisher_->publish(obstacle_collection);
         }
     }
 }

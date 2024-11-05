@@ -32,9 +32,12 @@ sudo apt install ros-$ROS_DISTRO-vision-opencv
 If it is the fist time you build the workspace follow the next commands to do not crash your computer. 
  ```bash
 colcon build --packages-select obstacles_information_msgs
+source install/setup.bash
 colcon build --packages-select global_dynamic_launcher
 colcon build --packages-select lidar_ground_getter
 colcon build --packages-select voxel_grid_filter
+colcon build --packages-select pointcloud_clustering
+colcon build --packages-select trajectory_obstacle_checker
 
 ```
 
@@ -42,4 +45,5 @@ colcon build --packages-select voxel_grid_filter
 ```bash
 ros2 launch global_dynamic_launcher rio_voxel_ground.launch.py
 ros2 launch pointcloud_clustering pointcloud_clustering.launch.py
+ros2 launch trajectory_obstacle_checker trajectory_obstacle_checker.launch.py
 ```
