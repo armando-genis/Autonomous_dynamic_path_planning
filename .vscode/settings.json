@@ -95,5 +95,6 @@
         "typeinfo": "cpp",
         "valarray": "cpp",
         "variant": "cpp"
-    }
+    },
+    "cmake.sourceDirectory": "/home/genis/Desktop/sdv_ws/src/Autonomous_dynamic_path_planning/dynamic_hybrid_path_planning"
 }
