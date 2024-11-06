@@ -13,6 +13,12 @@
 #include <geometry_msgs/msg/polygon.hpp>
 #include <geometry_msgs/msg/point32.hpp>
 #include <visualization_msgs/msg/marker_array.hpp>
+#include <tf2_ros/buffer.h>
+#include <tf2_ros/transform_listener.h>
+
+// Custom msgs obstacles_information_msgs for Obstacle and ObstacleCollection
+#include "obstacles_information_msgs/msg/obstacle.hpp"
+#include "obstacles_information_msgs/msg/obstacle_collection.hpp"
 
 #include <vector>
 #include <cmath>
@@ -23,6 +29,8 @@
 #include "CarData.h"
 #include "HybridAstar.h"
 #include "Node.h"
+
+using namespace std;
 
 class dynamic_hybrid_path_planning_node : public rclcpp::Node
 {
@@ -40,9 +48,33 @@ private:
 
     // Car Data
     CarData car_data_;
+    State car_state_;
 
     // Grid Map
     std::shared_ptr<Grid_map> grid_map_;
+
+    // colors for the terminal
+    string green = "\033[1;32m";
+    string red = "\033[1;31m";
+    string blue = "\033[1;34m";
+    string yellow = "\033[1;33m";
+    string purple = "\033[1;35m";
+    string reset = "\033[0m";
+
+    // tf2 buffer & listener
+    tf2_ros::Buffer tf2_buffer;
+    tf2_ros::TransformListener tf2_listener;
+
+    // publishers & subscribers
+    rclcpp::Subscription<nav_msgs::msg::OccupancyGrid>::SharedPtr global_grid_map_sub_;
+    rclcpp::Subscription<obstacles_information_msgs::msg::ObstacleCollection>::SharedPtr obstacle_info_subscription_;
+
+    // callback functions
+    void global_gridMapdata(const nav_msgs::msg::OccupancyGrid::SharedPtr map);
+    void obstacle_info_callback(const obstacles_information_msgs::msg::ObstacleCollection::SharedPtr msg);
+
+    // functions
+    void getCurrentRobotState();
 
 public:
     dynamic_hybrid_path_planning_node(/* args */);

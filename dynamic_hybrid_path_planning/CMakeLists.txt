@@ -17,6 +17,7 @@ find_package(nav_msgs REQUIRED)
 find_package(grid_map_ros REQUIRED)
 find_package(Eigen3 REQUIRED)
 find_package(OpenCV REQUIRED)
+find_package(obstacles_information_msgs REQUIRED)
 
 add_executable(dynamic_hybrid_path_planning_node 
                 src/dynamic_hybrid_path_planning_node.cpp # main file
@@ -27,7 +28,7 @@ add_executable(dynamic_hybrid_path_planning_node
                 src/reeds_shepp_path.cpp
               )
 
-ament_target_dependencies(dynamic_hybrid_path_planning_node rclcpp std_msgs geometry_msgs visualization_msgs tf2 tf2_geometry_msgs nav_msgs grid_map_ros Eigen3 OpenCV)
+ament_target_dependencies(dynamic_hybrid_path_planning_node rclcpp std_msgs geometry_msgs visualization_msgs tf2 tf2_geometry_msgs nav_msgs grid_map_ros Eigen3 OpenCV obstacles_information_msgs)
 
 target_include_directories(dynamic_hybrid_path_planning_node PUBLIC
   $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>

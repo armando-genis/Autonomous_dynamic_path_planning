@@ -10,7 +10,7 @@ sudo apt update
 sudo apt-get install libeigen3-dev
 sudo apt install libpcl-dev
 sudo apt-get install libpcap-dev
-
+sudo apt install libopencv-dev
 #ros2 packages
 sudo apt install ros-$ROS_DISTRO-joint-state-publisher-gui
 sudo apt install ros-$ROS_DISTRO-xacro
@@ -19,7 +19,9 @@ sudo apt install ros-$ROS_DISTRO-vision-msgs
 sudo apt install ros-$ROS_DISTRO-perception-pcl
 sudo apt install ros-$ROS_DISTRO-pcl-msgs
 sudo apt install ros-$ROS_DISTRO-vision-opencv
-
+sudo apt install ros-$ROS_DISTRO-grid-map-ros
+sudo apt install ros-$ROS_DISTRO-grid-map-cv
+sudo apt install ros-$ROS_DISTRO-cv-bridge
 ```
 
 ## → 🏅 lidar config 
@@ -39,7 +41,6 @@ colcon build --packages-select voxel_grid_filter
 colcon build --packages-select pointcloud_clustering
 colcon build --packages-select trajectory_obstacle_checker
 colcon build --packages-select dynamic_hybrid_path_planning
-
 ```
 
 ## → 💡 Launch 
