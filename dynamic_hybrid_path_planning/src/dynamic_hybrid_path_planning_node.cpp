@@ -27,6 +27,8 @@ dynamic_hybrid_path_planning_node::dynamic_hybrid_path_planning_node(/* args */)
     obstacle_info_subscription_ = this->create_subscription<obstacles_information_msgs::msg::ObstacleCollection>(
         "/obstacle_info", 10, std::bind(&dynamic_hybrid_path_planning_node::obstacle_info_callback, this, std::placeholders::_1));
 
+    occupancy_grid_pub_test_ = this->create_publisher<nav_msgs::msg::OccupancyGrid>("/occupancy_grid", 10);
+
     // Create the vehicle geometry
     car_data_ = CarData(maxSteerAngle, wheelBase, axleToFront, axleToBack, width);
     car_data_.createVehicleGeometry();
@@ -51,7 +53,7 @@ void dynamic_hybrid_path_planning_node::getCurrentRobotState()
     geometry_msgs::msg::Transform pose_tf;
     try
     {
-        pose_tf = tf2_buffer.lookupTransform("map", "velodyne", this->get_clock()->now(), std::chrono::milliseconds(50)).transform;
+        pose_tf = tf2_buffer.lookupTransform("map", "velodyne", tf2::TimePointZero).transform;
         car_state_.x = pose_tf.translation.x;
         car_state_.y = pose_tf.translation.y;
         tf2::Quaternion quat;
@@ -70,30 +72,70 @@ void dynamic_hybrid_path_planning_node::getCurrentRobotState()
 // callback function for global grid map
 void dynamic_hybrid_path_planning_node::global_gridMapdata(const nav_msgs::msg::OccupancyGrid::SharedPtr map)
 {
-    std::cout << blue << "Received global grid map data" << reset << std::endl;
+
+    auto init_time = std::chrono::system_clock::now();
+
+    // Call the function to get the current robot state
+    getCurrentRobotState();
+
+    // Define chunk size (e.g., 20x20 meters)
+    int chunk_size = 20; // 20 meters by 20 meters
+    int chunk_radius = chunk_size / 2;
+
+    // Convert car state to grid coordinates
+    int car_x_grid = static_cast<int>((car_state_.x - map->info.origin.position.x) / map->info.resolution);
+    int car_y_grid = static_cast<int>((car_state_.y - map->info.origin.position.y) / map->info.resolution);
+
+    // Define chunk boundaries
+    int min_x = std::max(0, car_x_grid - chunk_radius);
+    int max_x = std::min(static_cast<int>(map->info.width), car_x_grid + chunk_radius);
+    int min_y = std::max(0, car_y_grid - chunk_radius);
+    int max_y = std::min(static_cast<int>(map->info.height), car_y_grid + chunk_radius);
+
+    // Initialize the chunk grid
+    nav_msgs::msg::OccupancyGrid chunk;
+    chunk.header = map->header;
+    chunk.info.resolution = map->info.resolution;
+    chunk.info.width = max_x - min_x;
+    chunk.info.height = max_y - min_y;
+    chunk.info.origin.position.x = map->info.origin.position.x + min_x * map->info.resolution;
+    chunk.info.origin.position.y = map->info.origin.position.y + min_y * map->info.resolution;
+    chunk.info.origin.orientation.w = 1.0;
+
+    chunk.data.resize(chunk.info.width * chunk.info.height, -1); // Initialize with unknown values
+
+    // Copy data from the global map to the chunk
+    for (int y = min_y; y < max_y; ++y)
+    {
+        for (int x = min_x; x < max_x; ++x)
+        {
+            int global_index = y * map->info.width + x;
+            int local_x = x - min_x;
+            int local_y = y - min_y;
+            int chunk_index = local_y * chunk.info.width + local_x;
+
+            chunk.data[chunk_index] = map->data[global_index];
+        }
+    }
+
+    // Publish or use the chunk for planning
+    occupancy_grid_pub_test_->publish(chunk);
+
+    auto end_time = std::chrono::system_clock::now();
+    auto duration = std::chrono::duration_cast<std::chrono::milliseconds>(end_time - init_time).count();
+    cout << purple << "--> Map creation: " << duration << " ms" << reset << endl;
 }
 
 void dynamic_hybrid_path_planning_node::obstacle_info_callback(const obstacles_information_msgs::msg::ObstacleCollection::SharedPtr msg)
 {
-
-    // geometry_msgs / Polygon polygon
-
-    // for (const auto &obstacle : msg->obstacles)
-    // {
-    //     std::cout << "Obstacle ID: " << obstacle.id << std::endl;
-    // }
-
-    // cout numnbers of obstacles
-    cout << "Number of obstacles: " << msg->obstacles.size() << endl;
-
     nav_msgs::msg::OccupancyGrid grid;
     grid.header.frame_id = "base_footprint";
     grid.header.stamp = this->now();
     grid.info.resolution = 0.1;         // in meters
     grid.info.width = 120;              // grid width
     grid.info.height = 120;             // grid height
-    grid.info.origin.position.x = -5.0; // Center the origin of the grid
-    grid.info.origin.position.y = -5.0; // Center the origin of the grid
+    grid.info.origin.position.x = -6.0; // Center the origin of the grid
+    grid.info.origin.position.y = -6.0; // Center the origin of the grid
     grid.info.origin.position.z = 0.0;
     grid.info.origin.orientation.w = 1.0;
 
@@ -156,19 +198,21 @@ void dynamic_hybrid_path_planning_node::obstacle_info_callback(const obstacles_i
     for (size_t i = 0; i < msg->obstacles.size(); ++i)
     {
         const auto &obstacle = msg->obstacles[i];
-        std::cout << green << "Obstacle size: " << obstacle.polygon.points.size() << reset << std::endl;
-        std::cout << green << "-------------------" << reset << std::endl;
-        // for (size_t j = 0; j < obstacle.polygon.points.size(); ++j)
-        // {
-        //     const auto &p0 = obstacle.polygon.points[j];
-        //     const auto &p1 = obstacle.polygon.points[(j + 1) % obstacle.polygon.points.size()];
-        //     draw_inflated_line((p0.x - grid.info.origin.position.x) / grid.info.resolution,
-        //                        (p0.y - grid.info.origin.position.y) / grid.info.resolution,
-        //                        (p1.x - grid.info.origin.position.x) / grid.info.resolution,
-        //                        (p1.y - grid.info.origin.position.y) / grid.info.resolution,
-        //                        inflation_radius, value_to_mark);
-        // }
+
+        for (size_t j = 0; j < obstacle.polygon.points.size(); ++j)
+        {
+            auto &current_point = obstacle.polygon.points[j];
+            auto &next_point = obstacle.polygon.points[(j + 1) % obstacle.polygon.points.size()];
+
+            int x0 = static_cast<int>((current_point.x - grid.info.origin.position.x) / grid.info.resolution);
+            int y0 = static_cast<int>((current_point.y - grid.info.origin.position.y) / grid.info.resolution);
+            int x1 = static_cast<int>((next_point.x - grid.info.origin.position.x) / grid.info.resolution);
+            int y1 = static_cast<int>((next_point.y - grid.info.origin.position.y) / grid.info.resolution);
+
+            draw_inflated_line(x0, y0, x1, y1, inflation_radius, value_to_mark);
+        }
     }
+    occupancy_grid_pub_test_->publish(grid);
 }
 
 int main(int argc, char **argv)
