@@ -23,6 +23,7 @@
 #include <vector>
 #include <cmath>
 #include <iostream>
+#include <mutex>
 
 #include "State.h"
 #include "Grid_map.h"
@@ -52,7 +53,6 @@ private:
 
     // Grid Map
     std::shared_ptr<Grid_map> grid_map_;
-    nav_msgs::msg::OccupancyGrid rescaled_chunk;
 
     // colors for the terminal
     string green = "\033[1;32m";
@@ -71,18 +71,21 @@ private:
     rclcpp::Subscription<obstacles_information_msgs::msg::ObstacleCollection>::SharedPtr obstacle_info_subscription_;
 
     rclcpp::Publisher<nav_msgs::msg::OccupancyGrid>::SharedPtr occupancy_grid_pub_test_;
+    rclcpp::TimerBase::SharedPtr timer_;
 
     // callback functions
     void global_gridMapdata(const nav_msgs::msg::OccupancyGrid::SharedPtr map);
     void obstacle_info_callback(const obstacles_information_msgs::msg::ObstacleCollection::SharedPtr msg);
     void timer_callback();
 
+    std::shared_ptr<obstacles_information_msgs::msg::ObstacleCollection> latest_obstacles_;
+    std::mutex obstacle_mutex_;
+
     // functions
     void getCurrentRobotState();
     // functions for map combination
     cv::Mat toMat(const nav_msgs::msg::OccupancyGrid &map);
     cv::Mat rescaleChunk(const cv::Mat &chunk_mat, double scale_factor);
-    nav_msgs::msg::OccupancyGrid matToOccupancyGrid(const cv::Mat &mat, const nav_msgs::msg::OccupancyGrid &reference_map);
 
 public:
     dynamic_hybrid_path_planning_node(/* args */);
