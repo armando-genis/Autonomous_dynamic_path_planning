@@ -27,6 +27,9 @@ dynamic_hybrid_path_planning_node::dynamic_hybrid_path_planning_node(/* args */)
     obstacle_info_subscription_ = this->create_subscription<obstacles_information_msgs::msg::ObstacleCollection>(
         "/obstacle_info", 10, std::bind(&dynamic_hybrid_path_planning_node::obstacle_info_callback, this, std::placeholders::_1));
 
+    waypoints_subscription_ = this->create_subscription<visualization_msgs::msg::MarkerArray>(
+        "/waypoints_routing", 10, std::bind(&dynamic_hybrid_path_planning_node::waypoints_callback, this, std::placeholders::_1));
+
     occupancy_grid_pub_test_ = this->create_publisher<nav_msgs::msg::OccupancyGrid>("/occupancy_grid_obstacles", 10);
 
     timer_ = this->create_wall_timer(std::chrono::milliseconds(100), std::bind(&dynamic_hybrid_path_planning_node::timer_callback, this));
@@ -276,109 +279,27 @@ void dynamic_hybrid_path_planning_node::obstacle_info_callback(const obstacles_i
 {
     std::lock_guard<std::mutex> lock(obstacle_mutex_);
     latest_obstacles_ = msg;
+}
 
-    // nav_msgs::msg::OccupancyGrid grid;
-    // grid.header.frame_id = "map";
-    // grid.header.stamp = this->now();
-    // grid.info.resolution = 0.1; // in meters
-    // grid.info.width = 200;      // grid width
-    // grid.info.height = 200;     // grid height
+void dynamic_hybrid_path_planning_node::waypoints_callback(const visualization_msgs::msg::MarkerArray::SharedPtr msg)
+{
 
-    // // Center the grid origin around the robot's current position
-    // grid.info.origin.position.x = car_state_.x - (grid.info.width * grid.info.resolution) / 2.0;
-    // grid.info.origin.position.y = car_state_.y - (grid.info.height * grid.info.resolution) / 2.0;
-    // grid.info.origin.position.z = 0.0;
-    // grid.info.origin.orientation.w = 1.0;
+    if (msg->markers.empty())
+    {
+        std::cout << red << "No waypoints received" << reset << std::endl;
+        return;
+    }
 
-    // // Initialize grid data
-    // grid.data.resize(grid.info.width * grid.info.height, 0);
+    path_waypoints_.clear();
 
-    // auto mark_grid = [&](int x, int y, int value)
-    // {
-    //     if (x >= 0 && x < static_cast<int>(grid.info.width) && y >= 0 && y < static_cast<int>(grid.info.height))
-    //     {
-    //         grid.data[y * grid.info.width + x] = value; // Mark the cell
-    //     }
-    // };
-
-    // auto inflate_point = [&](int x, int y, int radius, int value)
-    // {
-    //     for (int dx = -radius; dx <= radius; ++dx)
-    //     {
-    //         for (int dy = -radius; dy <= radius; ++dy)
-    //         {
-    //             if (dx * dx + dy * dy <= radius * radius)
-    //             { // Circle equation
-    //                 mark_grid(x + dx, y + dy, value);
-    //             }
-    //         }
-    //     }
-    // };
-
-    // auto draw_inflated_line = [&](int x0, int y0, int x1, int y1, int radius, int value)
-    // {
-    //     int dx = abs(x1 - x0), dy = abs(y1 - y0);
-    //     int n = 1 + dx + dy;
-    //     int x_inc = (x1 > x0) ? 1 : -1;
-    //     int y_inc = (y1 > y0) ? 1 : -1;
-    //     int error = dx - dy;
-    //     dx *= 2;
-    //     dy *= 2;
-
-    //     for (; n > 0; --n)
-    //     {
-    //         inflate_point(x0, y0, radius, value);
-
-    //         if (error > 0)
-    //         {
-    //             x0 += x_inc;
-    //             error -= dy;
-    //         }
-    //         else
-    //         {
-    //             y0 += y_inc;
-    //             error += dx;
-    //         }
-    //     }
-    // };
-
-    // int inflation_radius = 3; // Inflated cells around the obstacles
-    // int value_to_mark = 100;
-
-    // // Transformation from lidar frame to map frame
-    // double cos_heading = cos(car_state_.heading);
-    // double sin_heading = sin(car_state_.heading);
-
-    // for (size_t i = 0; i < msg->obstacles.size(); ++i)
-    // {
-    //     const auto &obstacle = msg->obstacles[i];
-
-    //     for (size_t j = 0; j < obstacle.polygon.points.size(); ++j)
-    //     {
-
-    //         auto &current_point_lidar = obstacle.polygon.points[j];
-    //         auto &next_point_lidar = obstacle.polygon.points[(j + 1) % obstacle.polygon.points.size()];
-
-    //         geometry_msgs::msg::Point current_point_map;
-    //         current_point_map.x = car_state_.x + cos_heading * current_point_lidar.x - sin_heading * current_point_lidar.y;
-    //         current_point_map.y = car_state_.y + sin_heading * current_point_lidar.x + cos_heading * current_point_lidar.y;
-
-    //         geometry_msgs::msg::Point next_point_map;
-    //         next_point_map.x = car_state_.x + cos_heading * next_point_lidar.x - sin_heading * next_point_lidar.y;
-    //         next_point_map.y = car_state_.y + sin_heading * next_point_lidar.x + cos_heading * next_point_lidar.y;
-
-    //         // Adjust obstacle positions based on the grid's origin
-    //         int x0 = static_cast<int>((current_point_map.x - grid.info.origin.position.x) / grid.info.resolution);
-    //         int y0 = static_cast<int>((current_point_map.y - grid.info.origin.position.y) / grid.info.resolution);
-    //         int x1 = static_cast<int>((next_point_map.x - grid.info.origin.position.x) / grid.info.resolution);
-    //         int y1 = static_cast<int>((next_point_map.y - grid.info.origin.position.y) / grid.info.resolution);
-
-    //         draw_inflated_line(x0, y0, x1, y1, inflation_radius, value_to_mark);
-    //     }
-    // }
-
-    // Publish the grid with the obstacles centered around the robot's current state
-    // occupancy_grid_pub_test_->publish(grid);
+    for (const auto &marker : msg->markers)
+    {
+        Eigen::VectorXd waypoint(3);
+        waypoint(0) = marker.pose.position.x;
+        waypoint(1) = marker.pose.position.y;
+        waypoint(2) = marker.pose.position.z;
+        path_waypoints_.push_back(waypoint);
+    }
 }
 
 int main(int argc, char **argv)

@@ -62,6 +62,9 @@ private:
     string purple = "\033[1;35m";
     string reset = "\033[0m";
 
+    // for path planning
+    vector<Eigen::VectorXd> path_waypoints_;
+
     // tf2 buffer & listener
     tf2_ros::Buffer tf2_buffer;
     tf2_ros::TransformListener tf2_listener;
@@ -69,6 +72,7 @@ private:
     // publishers & subscribers
     rclcpp::Subscription<nav_msgs::msg::OccupancyGrid>::SharedPtr global_grid_map_sub_;
     rclcpp::Subscription<obstacles_information_msgs::msg::ObstacleCollection>::SharedPtr obstacle_info_subscription_;
+    rclcpp::Subscription<visualization_msgs::msg::MarkerArray>::SharedPtr waypoints_subscription_;
 
     rclcpp::Publisher<nav_msgs::msg::OccupancyGrid>::SharedPtr occupancy_grid_pub_test_;
     rclcpp::TimerBase::SharedPtr timer_;
@@ -76,6 +80,7 @@ private:
     // callback functions
     void global_gridMapdata(const nav_msgs::msg::OccupancyGrid::SharedPtr map);
     void obstacle_info_callback(const obstacles_information_msgs::msg::ObstacleCollection::SharedPtr msg);
+    void waypoints_callback(const visualization_msgs::msg::MarkerArray::SharedPtr msg);
     void timer_callback();
 
     std::shared_ptr<obstacles_information_msgs::msg::ObstacleCollection> latest_obstacles_;
