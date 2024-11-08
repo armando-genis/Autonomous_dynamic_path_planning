@@ -47,7 +47,6 @@ pointcloud_clustering_node::~pointcloud_clustering_node()
 // Point Cloud callback
 void pointcloud_clustering_node::pointCloudCallback(const sensor_msgs::msg::PointCloud2::SharedPtr msg)
 {
-    auto init_time = std::chrono::system_clock::now();
 
     // Convert ROS PointCloud2 to PCL PointCloud
     pcl::PointCloud<pcl::PointXYZ>::Ptr input_cloud(new pcl::PointCloud<pcl::PointXYZ>);
@@ -76,10 +75,6 @@ void pointcloud_clustering_node::pointCloudCallback(const sensor_msgs::msg::Poin
     {
         std::cout << red << "Error processing point cloud: " << e.what() << reset << std::endl;
     }
-
-    auto end_time = std::chrono::system_clock::now();
-    auto duration = std::chrono::duration_cast<std::chrono::milliseconds>(end_time - init_time).count();
-    // cout << blue << "Execution time: " << duration << " ms" << reset << endl;
 }
 
 void pointcloud_clustering_node::convex_hull(std::vector<pcl::PointCloud<pcl::PointXYZ>::Ptr> cloud_clusters)

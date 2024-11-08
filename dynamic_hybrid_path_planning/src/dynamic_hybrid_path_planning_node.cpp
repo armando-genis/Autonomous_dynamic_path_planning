@@ -27,7 +27,7 @@ dynamic_hybrid_path_planning_node::dynamic_hybrid_path_planning_node(/* args */)
     obstacle_info_subscription_ = this->create_subscription<obstacles_information_msgs::msg::ObstacleCollection>(
         "/obstacle_info", 10, std::bind(&dynamic_hybrid_path_planning_node::obstacle_info_callback, this, std::placeholders::_1));
 
-    occupancy_grid_pub_test_ = this->create_publisher<nav_msgs::msg::OccupancyGrid>("/occupancy_grid", 10);
+    occupancy_grid_pub_test_ = this->create_publisher<nav_msgs::msg::OccupancyGrid>("/occupancy_grid_obstacles", 10);
 
     // Create the vehicle geometry
     car_data_ = CarData(maxSteerAngle, wheelBase, axleToFront, axleToBack, width);
@@ -162,7 +162,7 @@ void dynamic_hybrid_path_planning_node::global_gridMapdata(const nav_msgs::msg::
     cv::Mat rescaled_chunk_mat = rescaleChunk(chunk_mat, scale_factor);
 
     // Convert the rescaled Mat back to an OccupancyGrid
-    auto rescaled_chunk = matToOccupancyGrid(rescaled_chunk_mat, chunk);
+    rescaled_chunk = matToOccupancyGrid(rescaled_chunk_mat, chunk);
 
     // Update the resolution and adjust the width and height of the rescaled chunk
     rescaled_chunk.header = map->header;
@@ -171,7 +171,7 @@ void dynamic_hybrid_path_planning_node::global_gridMapdata(const nav_msgs::msg::
     rescaled_chunk.info.height = rescaled_chunk_mat.rows;
 
     // Publish or use the chunk for planning
-    occupancy_grid_pub_test_->publish(rescaled_chunk);
+    // occupancy_grid_pub_test_->publish(rescaled_chunk);
 
     auto end_time = std::chrono::system_clock::now();
     auto duration = std::chrono::duration_cast<std::chrono::milliseconds>(end_time - init_time).count();
@@ -184,8 +184,8 @@ void dynamic_hybrid_path_planning_node::obstacle_info_callback(const obstacles_i
     grid.header.frame_id = "base_footprint";
     grid.header.stamp = this->now();
     grid.info.resolution = 0.1;         // in meters
-    grid.info.width = 120;              // grid width
-    grid.info.height = 120;             // grid height
+    grid.info.width = 200;              // grid width
+    grid.info.height = 200;             // grid height
     grid.info.origin.position.x = -6.0; // Center the origin of the grid
     grid.info.origin.position.y = -6.0; // Center the origin of the grid
     grid.info.origin.position.z = 0.0;
@@ -264,7 +264,6 @@ void dynamic_hybrid_path_planning_node::obstacle_info_callback(const obstacles_i
             draw_inflated_line(x0, y0, x1, y1, inflation_radius, value_to_mark);
         }
     }
-    occupancy_grid_pub_test_->publish(grid);
 }
 
 int main(int argc, char **argv)

@@ -20,8 +20,6 @@
 #include "obstacles_information_msgs/msg/obstacle.hpp"
 #include "obstacles_information_msgs/msg/obstacle_collection.hpp"
 
-#include <opencv2/opencv.hpp>
-
 #include <vector>
 #include <cmath>
 #include <iostream>
@@ -54,6 +52,7 @@ private:
 
     // Grid Map
     std::shared_ptr<Grid_map> grid_map_;
+    nav_msgs::msg::OccupancyGrid rescaled_chunk;
 
     // colors for the terminal
     string green = "\033[1;32m";
@@ -76,6 +75,7 @@ private:
     // callback functions
     void global_gridMapdata(const nav_msgs::msg::OccupancyGrid::SharedPtr map);
     void obstacle_info_callback(const obstacles_information_msgs::msg::ObstacleCollection::SharedPtr msg);
+    void timer_callback();
 
     // functions
     void getCurrentRobotState();
