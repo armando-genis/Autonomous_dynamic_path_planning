@@ -20,6 +20,8 @@
 #include "obstacles_information_msgs/msg/obstacle.hpp"
 #include "obstacles_information_msgs/msg/obstacle_collection.hpp"
 
+#include <opencv2/opencv.hpp>
+
 #include <vector>
 #include <cmath>
 #include <iostream>
@@ -77,6 +79,10 @@ private:
 
     // functions
     void getCurrentRobotState();
+    // functions for map combination
+    cv::Mat toMat(const nav_msgs::msg::OccupancyGrid &map);
+    cv::Mat rescaleChunk(const cv::Mat &chunk_mat, double scale_factor);
+    nav_msgs::msg::OccupancyGrid matToOccupancyGrid(const cv::Mat &mat, const nav_msgs::msg::OccupancyGrid &reference_map);
 
 public:
     dynamic_hybrid_path_planning_node(/* args */);
