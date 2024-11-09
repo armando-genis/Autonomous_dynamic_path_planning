@@ -50,9 +50,11 @@ private:
     // Car Data
     CarData car_data_;
     State car_state_;
+    State car_state_2;
 
     // Grid Map
-    std::shared_ptr<Grid_map> grid_map_;
+    std::shared_ptr<Grid_map>
+        grid_map_;
 
     // colors for the terminal
     string green = "\033[1;32m";
@@ -63,25 +65,35 @@ private:
     string reset = "\033[0m";
 
     // for path planning
-    vector<Eigen::VectorXd> path_waypoints_;
+    State waypoint_target_;
 
     // tf2 buffer & listener
     tf2_ros::Buffer tf2_buffer;
     tf2_ros::TransformListener tf2_listener;
 
+    // store start and goal point
+    std::vector<State> start_goal_points_;
+
+    nav_msgs::msg::OccupancyGrid rescaled_chunk;
+
     // publishers & subscribers
     rclcpp::Subscription<nav_msgs::msg::OccupancyGrid>::SharedPtr global_grid_map_sub_;
     rclcpp::Subscription<obstacles_information_msgs::msg::ObstacleCollection>::SharedPtr obstacle_info_subscription_;
-    rclcpp::Subscription<visualization_msgs::msg::MarkerArray>::SharedPtr waypoints_subscription_;
-
     rclcpp::Publisher<nav_msgs::msg::OccupancyGrid>::SharedPtr occupancy_grid_pub_test_;
     rclcpp::TimerBase::SharedPtr timer_;
+    rclcpp::Subscription<visualization_msgs::msg::Marker>::SharedPtr target_waypoint_subscriber_;
+
+    // debug publisher
+    rclcpp::Publisher<visualization_msgs::msg::MarkerArray>::SharedPtr arrow_pub_;
+    rclcpp::Publisher<visualization_msgs::msg::MarkerArray>::SharedPtr hybrid_astar_path_pub_;
 
     // callback functions
     void global_gridMapdata(const nav_msgs::msg::OccupancyGrid::SharedPtr map);
     void obstacle_info_callback(const obstacles_information_msgs::msg::ObstacleCollection::SharedPtr msg);
-    void waypoints_callback(const visualization_msgs::msg::MarkerArray::SharedPtr msg);
     void timer_callback();
+    void markerCallback(const visualization_msgs::msg::Marker::SharedPtr msg);
+    void hybridAstarPathPlanning();
+    void Star_End_point_visualization();
 
     std::shared_ptr<obstacles_information_msgs::msg::ObstacleCollection> latest_obstacles_;
     std::mutex obstacle_mutex_;

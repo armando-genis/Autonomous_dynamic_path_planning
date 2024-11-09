@@ -27,12 +27,16 @@ dynamic_hybrid_path_planning_node::dynamic_hybrid_path_planning_node(/* args */)
     obstacle_info_subscription_ = this->create_subscription<obstacles_information_msgs::msg::ObstacleCollection>(
         "/obstacle_info", 10, std::bind(&dynamic_hybrid_path_planning_node::obstacle_info_callback, this, std::placeholders::_1));
 
-    waypoints_subscription_ = this->create_subscription<visualization_msgs::msg::MarkerArray>(
-        "/waypoints_routing", 10, std::bind(&dynamic_hybrid_path_planning_node::waypoints_callback, this, std::placeholders::_1));
-
     occupancy_grid_pub_test_ = this->create_publisher<nav_msgs::msg::OccupancyGrid>("/occupancy_grid_obstacles", 10);
 
     timer_ = this->create_wall_timer(std::chrono::milliseconds(100), std::bind(&dynamic_hybrid_path_planning_node::timer_callback, this));
+
+    target_waypoint_subscriber_ = this->create_subscription<visualization_msgs::msg::Marker>("target_waypoint_marker", 10,
+                                                                                             std::bind(&dynamic_hybrid_path_planning_node::markerCallback, this, std::placeholders::_1));
+
+    arrow_pub_ = this->create_publisher<visualization_msgs::msg::MarkerArray>("/start_and_end_arrows", 10);
+
+    hybrid_astar_path_pub_ = this->create_publisher<visualization_msgs::msg::MarkerArray>("/hybrid_astar_path", 10);
 
     // Create the vehicle geometry
     car_data_ = CarData(maxSteerAngle, wheelBase, axleToFront, axleToBack, width);
@@ -66,6 +70,11 @@ void dynamic_hybrid_path_planning_node::getCurrentRobotState()
         double roll, pitch, yaw;
         tf2::Matrix3x3(quat).getRPY(roll, pitch, yaw);
         car_state_.heading = yaw;
+
+        // Calculate car_2 as 0.5 meters in front of car_state_
+        car_state_2.x = car_state_.x + 0.5 * cos(yaw);
+        car_state_2.y = car_state_.y + 0.5 * sin(yaw);
+        car_state_2.heading = yaw; // Same heading as car_state_
     }
 
     catch (tf2::TransformException &ex)
@@ -76,7 +85,7 @@ void dynamic_hybrid_path_planning_node::getCurrentRobotState()
 
 void dynamic_hybrid_path_planning_node::timer_callback()
 {
-    getCurrentRobotState();
+    // getCurrentRobotState();
 }
 
 cv::Mat dynamic_hybrid_path_planning_node::toMat(const nav_msgs::msg::OccupancyGrid &map)
@@ -104,6 +113,8 @@ cv::Mat dynamic_hybrid_path_planning_node::rescaleChunk(const cv::Mat &chunk_mat
 // callback function for global grid map
 void dynamic_hybrid_path_planning_node::global_gridMapdata(const nav_msgs::msg::OccupancyGrid::SharedPtr map)
 {
+
+    getCurrentRobotState();
 
     // return if state is not available
     if ((car_state_.x == 0.0 && car_state_.y == 0.0) || map->data.empty())
@@ -170,7 +181,7 @@ void dynamic_hybrid_path_planning_node::global_gridMapdata(const nav_msgs::msg::
     cv::Mat chunk_mat = toMat(chunk);
     cv::Mat rescaled_chunk_mat = rescaleChunk(chunk_mat, scale_factor);
 
-    nav_msgs::msg::OccupancyGrid rescaled_chunk;
+    // nav_msgs::msg::OccupancyGrid rescaled_chunk;
     rescaled_chunk.header = map->header;
     rescaled_chunk.info.resolution = 0.1;
     rescaled_chunk.info.width = rescaled_chunk_mat.cols;
@@ -273,6 +284,33 @@ void dynamic_hybrid_path_planning_node::global_gridMapdata(const nav_msgs::msg::
     }
 
     occupancy_grid_pub_test_->publish(rescaled_chunk);
+
+    // if map is not available
+    if (rescaled_chunk.data.empty())
+    {
+        std::cout << red << "Map data not available" << reset << std::endl;
+        return;
+    }
+
+    // Hybrid A* Path Planning
+    grid_map_ = std::make_shared<Grid_map>(rescaled_chunk);
+    grid_map_->setcarData(car_data_);
+
+    std::cout << green << "-------> setup already" << reset << std::endl;
+
+    if (grid_map_->isSingleStateCollisionFree(car_state_2))
+    {
+        RCLCPP_ERROR(this->get_logger(), "\033[1;31m --> car point is in collision or out of the map <-- \033[0m");
+        return;
+    }
+
+    if (grid_map_->isSingleStateCollisionFree(waypoint_target_))
+    {
+        RCLCPP_ERROR(this->get_logger(), "\033[1;31m --> waypoint point is in collision or out of the map <-- \033[0m");
+        return;
+    }
+
+    hybridAstarPathPlanning();
 }
 
 void dynamic_hybrid_path_planning_node::obstacle_info_callback(const obstacles_information_msgs::msg::ObstacleCollection::SharedPtr msg)
@@ -281,25 +319,176 @@ void dynamic_hybrid_path_planning_node::obstacle_info_callback(const obstacles_i
     latest_obstacles_ = msg;
 }
 
-void dynamic_hybrid_path_planning_node::waypoints_callback(const visualization_msgs::msg::MarkerArray::SharedPtr msg)
+void dynamic_hybrid_path_planning_node::markerCallback(const visualization_msgs::msg::Marker::SharedPtr msg)
+{
+    waypoint_target_.x = msg->pose.position.x;
+    waypoint_target_.y = msg->pose.position.y;
+    tf2::Quaternion quat;
+    tf2::fromMsg(msg->pose.orientation, quat);
+    double roll, pitch, yaw;
+    tf2::Matrix3x3(quat).getRPY(roll, pitch, yaw);
+    waypoint_target_.heading = yaw;
+}
+
+void dynamic_hybrid_path_planning_node::hybridAstarPathPlanning()
+{
+    start_goal_points_.push_back(car_state_2);
+    start_goal_points_.push_back(waypoint_target_);
+
+    Star_End_point_visualization();
+
+    HybridAstar hybrid_astar(*grid_map_, car_data_, pathLength, step_car);
+    auto goal_trajectory = hybrid_astar.run(car_state_2, waypoint_target_);
+
+    visualization_msgs::msg::MarkerArray marker_array_next;
+    visualization_msgs::msg::MarkerArray arrow_marker_array;
+    int id = 4000; // Unique ID for each marker
+    size_t total_states = goal_trajectory.size();
+
+    for (size_t i = 0; i < goal_trajectory.size(); ++i)
+    {
+        const auto &state = goal_trajectory[i];
+
+        // Create the CUBE marker for the car polygon
+        visualization_msgs::msg::Marker car_polygon_marker;
+        car_polygon_marker.header.frame_id = "map";
+        car_polygon_marker.header.stamp = this->now();
+        car_polygon_marker.ns = "next_state_polygons";
+        car_polygon_marker.action = visualization_msgs::msg::Marker::ADD;
+        car_polygon_marker.id = id++;
+        car_polygon_marker.type = visualization_msgs::msg::Marker::CUBE;
+
+        // Set the size of the CUBE
+        car_polygon_marker.scale.x = car_data_.axleToFront + car_data_.axleToBack; // Length of the car
+        car_polygon_marker.scale.y = car_data_.width;                              // Width of the car
+        car_polygon_marker.scale.z = 0.1;                                          // Height of the CUBE
+
+        // Calculate interpolation factor (0.0 to 1.0) for color transition
+        double t = (total_states > 1) ? static_cast<double>(i) / (total_states - 1) : 1.0;
+
+        // Initialize RGB values for Yellow -> Green -> Blue transition
+        double r = 0.0, g = 1.0, b = 0.0;
+        if (t < 0.5)
+        {
+            // Yellow to Green transition (first half)
+            double yellow_to_green_factor = t / 0.5;
+            r = 1.0 - yellow_to_green_factor;
+            g = 1.0;
+            b = 0.0;
+        }
+        else
+        {
+            // Green to Blue transition (second half)
+            double green_to_blue_factor = (t - 0.5) / 0.5;
+            r = 0.0;
+            g = 1.0 - green_to_blue_factor;
+            b = green_to_blue_factor;
+        }
+
+        car_polygon_marker.color.r = r;
+        car_polygon_marker.color.g = g;
+        car_polygon_marker.color.b = b;
+        car_polygon_marker.color.a = 0.5;
+        car_polygon_marker.pose.position.x = state.x;
+        car_polygon_marker.pose.position.y = state.y;
+        car_polygon_marker.pose.position.z = 0.025;
+
+        // Convert heading (yaw) to quaternion for marker orientation
+        tf2::Quaternion quat;
+        quat.setRPY(0, 0, state.heading);
+        car_polygon_marker.pose.orientation.x = quat.x();
+        car_polygon_marker.pose.orientation.y = quat.y();
+        car_polygon_marker.pose.orientation.z = quat.z();
+        car_polygon_marker.pose.orientation.w = quat.w();
+
+        marker_array_next.markers.push_back(car_polygon_marker);
+
+        // Create arrow marker to represent the heading
+        visualization_msgs::msg::Marker arrow_marker;
+        arrow_marker.header.frame_id = "map";
+        arrow_marker.header.stamp = this->now();
+        arrow_marker.ns = "state_heading_arrows";
+        arrow_marker.action = visualization_msgs::msg::Marker::ADD;
+        arrow_marker.id = id++;
+        arrow_marker.type = visualization_msgs::msg::Marker::ARROW;
+
+        // Set arrow size (you can adjust these values as needed)
+        arrow_marker.scale.x = 0.8;  // Arrow length
+        arrow_marker.scale.y = 0.15; // Arrow width
+        arrow_marker.scale.z = 0.15; // Arrow height
+
+        // Set arrow color (you can use a different color for arrows)
+        arrow_marker.color.r = 1.0;
+        arrow_marker.color.g = 1.0;
+        arrow_marker.color.b = 1.0;
+        arrow_marker.color.a = 0.6;
+
+        // Position the arrow at the same (x, y) as the state, with a slightly higher z-value
+        arrow_marker.pose.position.x = state.x;
+        arrow_marker.pose.position.y = state.y;
+        arrow_marker.pose.position.z = 0.1; // Slightly above the ground
+
+        // Set the orientation of the arrow based on the heading
+        arrow_marker.pose.orientation.x = quat.x();
+        arrow_marker.pose.orientation.y = quat.y();
+        arrow_marker.pose.orientation.z = quat.z();
+        arrow_marker.pose.orientation.w = quat.w();
+
+        arrow_marker_array.markers.push_back(arrow_marker);
+    }
+
+    // Publish the MarkerArray containing the CUBEs
+    hybrid_astar_path_pub_->publish(marker_array_next);
+
+    // Memory clean up
+    goal_trajectory.clear();
+    marker_array_next.markers.clear();
+    arrow_marker_array.markers.clear();
+}
+
+void dynamic_hybrid_path_planning_node::Star_End_point_visualization()
 {
 
-    if (msg->markers.empty())
+    visualization_msgs::msg::MarkerArray arrow_states;
+    int id = 7000; // Unique ID for each marker
+    for (const auto &state : start_goal_points_)
     {
-        std::cout << red << "No waypoints received" << reset << std::endl;
-        return;
+        visualization_msgs::msg::Marker marker;
+        marker.header.frame_id = "map"; // Assuming map frame
+        marker.header.stamp = this->now();
+        marker.ns = "next_state_arrows";
+        marker.action = visualization_msgs::msg::Marker::ADD;
+        marker.id = id++;
+        marker.type = visualization_msgs::msg::Marker::ARROW;
+
+        marker.pose.position.x = state.x;
+        marker.pose.position.y = state.y;
+        marker.pose.position.z = 0.0;
+
+        // Set the orientation based on the yaw angle (heading)
+        tf2::Quaternion quat;
+        quat.setRPY(0, 0, state.heading);
+        marker.pose.orientation.x = quat.x();
+        marker.pose.orientation.y = quat.y();
+        marker.pose.orientation.z = quat.z();
+        marker.pose.orientation.w = quat.w();
+
+        marker.scale.x = 2.0; // Length of the arrow
+        marker.scale.y = 0.3; // Width of the arrow shaft
+        marker.scale.z = 0.3; // Height of the arrow shaft
+
+        marker.color.r = 1.0;
+        marker.color.g = 1.0;
+        marker.color.b = 1.0;
+        marker.color.a = 1.0;
+
+        arrow_states.markers.push_back(marker);
     }
 
-    path_waypoints_.clear();
+    // Publish the MarkerArray containing the arrows
+    arrow_pub_->publish(arrow_states);
 
-    for (const auto &marker : msg->markers)
-    {
-        Eigen::VectorXd waypoint(3);
-        waypoint(0) = marker.pose.position.x;
-        waypoint(1) = marker.pose.position.y;
-        waypoint(2) = marker.pose.position.z;
-        path_waypoints_.push_back(waypoint);
-    }
+    start_goal_points_.clear();
 }
 
 int main(int argc, char **argv)
