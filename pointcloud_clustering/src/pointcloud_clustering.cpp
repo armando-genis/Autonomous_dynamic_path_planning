@@ -24,7 +24,7 @@ pointcloud_clustering_node::pointcloud_clustering_node(/* args */) : Node("point
 
     // Create subscriber
     sub_points_cloud_ = this->create_subscription<sensor_msgs::msg::PointCloud2>("/ground_removal", 10, std::bind(&pointcloud_clustering_node::pointCloudCallback, this, std::placeholders::_1));
-    hull_publisher_ = this->create_publisher<visualization_msgs::msg::MarkerArray>("/hull_marker", 10);
+    // hull_publisher_ = this->create_publisher<visualization_msgs::msg::MarkerArray>("/hull_marker", 10);
     obstacle_info_publisher_ = this->create_publisher<obstacles_information_msgs::msg::ObstacleCollection>("/obstacle_info", 10);
 
     // Create point processor
@@ -101,7 +101,7 @@ void pointcloud_clustering_node::convex_hull(std::vector<pcl::PointCloud<pcl::Po
         }
         if (hull.getDimension() == 2)
         {
-            std::vector<geometry_msgs::msg::Point> hull_points;
+            // std::vector<geometry_msgs::msg::Point> hull_points;
             obstacles_information_msgs::msg::Obstacle obstacle;
             geometry_msgs::msg::Polygon polygon;
 
@@ -113,15 +113,15 @@ void pointcloud_clustering_node::convex_hull(std::vector<pcl::PointCloud<pcl::Po
                 p.z = 0.0;
                 polygon.points.push_back(p);
 
-                geometry_msgs::msg::Point hull_point;
-                hull_point.x = p.x;
-                hull_point.y = p.y;
-                hull_point.z = p.z;
-                hull_points.push_back(hull_point);
+                // geometry_msgs::msg::Point hull_point;
+                // hull_point.x = p.x;
+                // hull_point.y = p.y;
+                // hull_point.z = p.z;
+                // hull_points.push_back(hull_point);
             }
 
             // Close the loop
-            hull_points.push_back(hull_points.front());
+            // hull_points.push_back(hull_points.front());
             polygon.points.push_back(polygon.points.front());
 
             obstacle.polygon = polygon;
@@ -131,27 +131,27 @@ void pointcloud_clustering_node::convex_hull(std::vector<pcl::PointCloud<pcl::Po
             obstacle_collection.obstacles.push_back(obstacle);
 
             // Create a marker for the convex hull
-            visualization_msgs::msg::Marker hull_marker;
-            hull_marker.header.frame_id = "velodyne";
-            hull_marker.header.stamp = this->now();
-            hull_marker.ns = "hull";
-            hull_marker.id = index;
-            hull_marker.type = visualization_msgs::msg::Marker::LINE_STRIP;
-            hull_marker.action = visualization_msgs::msg::Marker::ADD;
-            hull_marker.scale.x = 0.07;
-            hull_marker.color.r = 1.0;
-            hull_marker.color.g = 1.0;
-            hull_marker.color.b = 1.0;
-            hull_marker.color.a = 1.0;
-            hull_marker.points = hull_points;
+            // visualization_msgs::msg::Marker hull_marker;
+            // hull_marker.header.frame_id = "velodyne";
+            // hull_marker.header.stamp = this->now();
+            // hull_marker.ns = "hull";
+            // hull_marker.id = index;
+            // hull_marker.type = visualization_msgs::msg::Marker::LINE_STRIP;
+            // hull_marker.action = visualization_msgs::msg::Marker::ADD;
+            // hull_marker.scale.x = 0.07;
+            // hull_marker.color.r = 1.0;
+            // hull_marker.color.g = 1.0;
+            // hull_marker.color.b = 1.0;
+            // hull_marker.color.a = 1.0;
+            // hull_marker.points = hull_points;
 
-            hull_markers.markers.push_back(hull_marker);
+            // hull_markers.markers.push_back(hull_marker);
 
             index++;
         }
         if (!hull_markers.markers.empty())
         {
-            hull_publisher_->publish(hull_markers);
+            // hull_publisher_->publish(hull_markers);
             obstacle_info_publisher_->publish(obstacle_collection);
         }
     }

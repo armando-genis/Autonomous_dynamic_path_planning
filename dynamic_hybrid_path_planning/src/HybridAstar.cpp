@@ -3,7 +3,7 @@
 HybridAstar::HybridAstar(Grid_map grid_map, CarData car_data, double simulationLength, double step_car)
     : grid_map_(grid_map), car_data_(car_data), simulationLength(simulationLength), step_car(step_car)
 {
-    cout << purple << "--Hybrid Astar Initialized--" << reset << endl;
+    cout << purple << " ----> Hybrid Astar Initialized <----" << reset << endl;
 
     // Step 2: Generate motion commands
     motionCommands();
@@ -324,9 +324,10 @@ std::shared_ptr<planner::HolonomicNode> HybridAstar::getNode(int index, vector<s
 }
 
 // ============================= Hybrid A* ============================
-double HybridAstar::eucledianCost(const vector<int> &holonomicMotionCommand, const State &current_state)
+inline double HybridAstar::eucledianCost(const std::vector<int> &command, const int current_x, const int current_y)
 {
-    double distance_cost = std::hypot(holonomicMotionCommand[0], holonomicMotionCommand[1]);
+
+    double distance_cost = std::hypot(command[0], command[1]);
 
     double obstacle_penalty = 0.0;
 
@@ -334,8 +335,8 @@ double HybridAstar::eucledianCost(const vector<int> &holonomicMotionCommand, con
     {
         for (int dy = -1; dy <= 1; ++dy)
         {
-            int neighbor_x = current_state.gridx + dx;
-            int neighbor_y = current_state.gridy + dy;
+            int neighbor_x = current_x + dx;
+            int neighbor_y = current_y + dy;
 
             // Increase penalty if neighbor cell is in collision
             if (grid_map_.isInCollision(neighbor_x, neighbor_y))
@@ -349,96 +350,92 @@ double HybridAstar::eucledianCost(const vector<int> &holonomicMotionCommand, con
     return distance_cost + obstacle_penalty;
 }
 
-vector<std::shared_ptr<planner::HolonomicNode>> HybridAstar::holonomicCostsWithObstacles_planning(const std::shared_ptr<planner::Node> &GoalNode)
+std::vector<double> HybridAstar::holonomicCostsWithObstacles_planning(const std::shared_ptr<planner::Node> &GoalNode)
 {
-
     auto init_time = std::chrono::system_clock::now();
-    // Get the goal state. This already has the grid coordinates as gridx and gridy
-    std::vector<std::shared_ptr<planner::HolonomicNode>> goal_map_;
+
+    size_t width = grid_map_.getWidth();
+    size_t height = grid_map_.getHeight();
+    size_t map_size = width * height;
+
+    // Initialize the cost map and closed set
+    std::vector<double> cost_map_(map_size, std::numeric_limits<double>::infinity());
+    std::vector<bool> closed_set_(map_size, false);
 
     State goal_state = GoalNode->Current_state;
     int goal_index = grid_map_.toCellIndex(goal_state.gridx, goal_state.gridy);
 
-    auto gNode = std::make_shared<planner::HolonomicNode>(goal_state, 0, std::weak_ptr<planner::HolonomicNode>());
-
-    // resize goal map as map
-    goal_map_.resize(grid_map_.getWidth() * grid_map_.getHeight());
-
-    // Assign shared_ptr instances to all elements
-    for (size_t y = 0; y < grid_map_.getHeight(); y++)
-    {
-        for (size_t x = 0; x < grid_map_.getWidth(); x++)
-        {
-            State state;
-            state.gridx = x;
-            state.gridy = y;
-            int index = grid_map_.toCellIndex(x, y);
-            goal_map_[index] = std::make_shared<planner::HolonomicNode>(state, 1000, std::weak_ptr<planner::HolonomicNode>());
-        }
-    }
+    // Set the goal node cost to zero
+    cost_map_[goal_index] = 0.0;
 
     // Generate holonomic motion commands (8-directional movement)
-    std::vector<std::vector<int>> holonomicMotionCommand = holonomicMotionCommands();
-
-    int goal_cost_max_ = 0;
-
-    // set the goal node to the goal map
-    goal_map_[goal_index] = gNode;
+    const std::vector<std::vector<int>> &holonomicMotionCommand = holonomicMotionCommands();
 
     // Create a priority queue for the open set
-    std::priority_queue<std::shared_ptr<planner::HolonomicNode>, std::vector<std::shared_ptr<planner::HolonomicNode>>, planner::NodeGreater> openset_;
+    // The priority queue stores pairs of (cost, index)
+    using PQElement = std::pair<double, int>;
+    std::priority_queue<PQElement, std::vector<PQElement>, std::greater<PQElement>> openset_;
 
-    // push start node into open set
-    openset_.push(getNode(goal_index, goal_map_));
+    // Push the goal node into the open set
+    openset_.push(std::make_pair(0.0, goal_index));
 
     int count = 0;
-    // int max_iterations = grid_map_.getWidth() * grid_map_.getHeight();
-    // cout << "max iterations: " << max_iterations << endl;
 
     while (!openset_.empty())
     {
         count++;
 
-        // get the node ptr with lowest cost
-        auto current_Node = openset_.top();
-        // remove the node ptr from openset
+        // Get the node with the lowest cost
+        auto [current_cost, current_index] = openset_.top();
         openset_.pop();
-        // get the cost of the current node
-        double current_cost = current_Node->cost;
-        // for to get the neighbor
+
+        // If this node has already been processed, skip it
+        if (closed_set_[current_index])
+            continue;
+
+        // Mark the node as closed
+        closed_set_[current_index] = true;
+
+        // Get the current node's grid coordinates
+        int current_x = current_index % width;
+        int current_y = current_index / width;
+
+        // For each holonomic motion command
         for (const auto &command : holonomicMotionCommand)
         {
-            int cell_x = current_Node->Current_state.gridx + command[0];
-            int cell_y = current_Node->Current_state.gridy + command[1];
+            int cell_x = current_x + command[0];
+            int cell_y = current_y + command[1];
 
-            // check if the neighbor is inside the boundary of the map and not in collision
-            if (!grid_map_.isInCollision(cell_x, cell_y))
+            // Check if the neighbor is within bounds
+            if (cell_x < 0 || cell_x >= static_cast<int>(width) || cell_y < 0 || cell_y >= static_cast<int>(height))
+                continue;
+
+            // Get the index of the neighboring cell
+            int neighbor_index = grid_map_.toCellIndex(cell_x, cell_y);
+
+            // If the neighbor is in collision or already closed, skip it
+            if (grid_map_.isInCollision(cell_x, cell_y) || closed_set_[neighbor_index])
+                continue;
+
+            // Calculate the new cost to reach the neighbor
+            double movement_cost = eucledianCost(command, current_x, current_y);
+            double newCost = current_cost + movement_cost;
+
+
+            // If the new cost is lower, update the cost map and push into the open set
+            if (newCost < cost_map_[neighbor_index])
             {
-                // Calculate the new cost to reach the neighbor
-                double newCost = current_cost + eucledianCost(command, current_Node->Current_state);
-                // Get the index of the neighboring cell
-                int current_index = grid_map_.toCellIndex(cell_x, cell_y);
-                auto neigh_node_ptr = getNode(current_index, goal_map_);
-                // Update the neighbor's cost if the new cost is lower
-                if (neigh_node_ptr->cost > newCost)
-                {
-                    neigh_node_ptr->cost = newCost;
-                    openset_.push(neigh_node_ptr);
-
-                    // Update the max goal cost if necessary
-                    goal_cost_max_ = std::max(goal_cost_max_, static_cast<int>(neigh_node_ptr->cost));
-                }
+                cost_map_[neighbor_index] = newCost;
+                openset_.push(std::make_pair(newCost, neighbor_index));
             }
         }
     }
-    // cout << blue << "goal cost max: " << goal_cost_max_ << reset << endl;
-    // cout << blue << "count: " << count << reset << endl;
 
     auto end_time = std::chrono::system_clock::now();
     auto duration = std::chrono::duration_cast<std::chrono::milliseconds>(end_time - init_time).count();
-    cout << blue << "Execution time holomonic: " << duration << " ms" << reset << endl;
+    std::cout << blue << "Execution time holonomic: " << duration << " ms" << reset << std::endl;
 
-    return goal_map_;
+    return cost_map_;
 }
 
 vector<State> HybridAstar::run(State start_state, State goal_state)
@@ -485,10 +482,8 @@ vector<State> HybridAstar::run(State start_state, State goal_state)
 
     // Step 6: Add the start node to the open set
     openSet[start_state_] = startNode;
-    costQueue.push({startNode->Cost_path + hybridCost * goal_map_[start_index]->cost, startNode});
+    costQueue.push({startNode->Cost_path + hybridCost * goal_map_[start_index], startNode});
 
-    // Use max cost calculation can not be efficient
-    // costQueue.push({std::max(startNode->Cost_path, hybridCost * goal_map_[start_index]->cost), startNode});
 
     // Step 6.5: Initialize a counter for the number of iterations
     int iterations = 0;
@@ -520,13 +515,13 @@ vector<State> HybridAstar::run(State start_state, State goal_state)
         openSet.erase(currentState);
         closedSet[currentState] = currentNode;
 
-        // Try to find a Dubins path to the goal from the current node
+        // Try to find a Reeds-Shepp path to the goal from the current node
         auto dNode = reeds_shepp_Path(currentNode, goalNode);
 
-        // If a valid Dubins path is found, exit the loop
+        // If a valid Reeds-Shepp path is found, exit the loop
         if (dNode)
         {
-            cout << green << "Reeds shepp path found" << reset << endl;
+            cout << green << "Reeds-Shepp path found" << reset << endl;
             closedSet[dNode->Current_state] = dNode;
             goalNode = dNode;
             break;
@@ -551,11 +546,9 @@ vector<State> HybridAstar::run(State start_state, State goal_state)
         // Get neighboring nodes by simulating motion
         auto neighbors = GetnextNeighbours(currentNode);
 
-        // cout << red << "===============================" << reset << endl;
 
         for (auto &neighbor : neighbors)
         {
-
             // Get the neighbor's state
             State neighborState = neighbor->Current_state;
             // Skip if this neighbor is already in the closed set
@@ -567,10 +560,13 @@ vector<State> HybridAstar::run(State start_state, State goal_state)
             // Calculate the neighbor's cost
             int neighbor_index = grid_map_.toCellIndex(neighborState.gridx, neighborState.gridy);
 
-            double neighborCost = neighbor->Cost_path + hybridCost * goal_map_[neighbor_index]->cost;
+            // Ensure that the neighbor_index is within bounds
+            if (neighbor_index < 0 || neighbor_index >= static_cast<int>(goal_map_.size()))
+            {
+                continue; // Skip if the index is out of bounds
+            }
 
-            // Use max cost calculation can not be efficient
-            // double neighborCost = std::max(neighbor->Cost_path, hybridCost * goal_map_[neighbor_index]->cost);
+            double neighborCost = neighbor->Cost_path + hybridCost * goal_map_[neighbor_index];
 
             // If neighbor is not in the open set, or the new cost is lower, add/update it
             if (openSet.find(neighborState) == openSet.end() || neighbor->Cost_path < openSet[neighborState]->Cost_path)
@@ -585,7 +581,7 @@ vector<State> HybridAstar::run(State start_state, State goal_state)
     goal_trajectory.clear(); // Clear any existing trajectory
     cout << blue << "Iterations: " << iterations << reset << endl;
 
-    // Use goalNode for backtracking, which now includes Dubins if found
+    // Use goalNode for backtracking, which now includes Reeds-Shepp if found
     auto backtrackNode = goalNode;
     while (backtrackNode)
     {
@@ -615,7 +611,9 @@ vector<State> HybridAstar::run(State start_state, State goal_state)
         costQueue.pop();
     }
 
-    cout << blue << " ----> Finish <---- " << reset << endl;
+    goal_map_.clear();
+
+    cout << purple << " ----> Finish <---- " << reset << endl;
 
     return goal_trajectory;
 }

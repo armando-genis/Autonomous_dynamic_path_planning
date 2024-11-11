@@ -51,7 +51,6 @@ private:
     Eigen::Vector4f ROI_MAX_POINT, ROI_MIN_POINT;
 
     rclcpp::Subscription<sensor_msgs::msg::PointCloud2>::SharedPtr sub_;
-    // rclcpp::Publisher<sensor_msgs::msg::PointCloud2>::SharedPtr down_sampling_pub_;
     rclcpp::Publisher<sensor_msgs::msg::PointCloud2>::SharedPtr roi_sampling_pub_;
 
     void pointCloudCallback(const sensor_msgs::msg::PointCloud2::SharedPtr msg);
@@ -94,7 +93,6 @@ VoxelGrid::VoxelGrid(/* args */) : Node("voxel_grid_filter")
 
     sub_ = this->create_subscription<sensor_msgs::msg::PointCloud2>("/points_rotated", 10, std::bind(&VoxelGrid::pointCloudCallback, this, std::placeholders::_1));
 
-    // down_sampling_pub_ = this->create_publisher<sensor_msgs::msg::PointCloud2>("points_down_sampling", 10);
     roi_sampling_pub_ = this->create_publisher<sensor_msgs::msg::PointCloud2>("points_roi", 10);
 
     ROI_MAX_POINT = Eigen::Vector4f(roi_max_x_, roi_max_y_, roi_max_z_, 1);
@@ -137,11 +135,6 @@ void VoxelGrid::pointCloudCallback(const sensor_msgs::msg::PointCloud2::SharedPt
 
     pcl::PointCloud<pcl::PointXYZI>::Ptr cloud_roi(new pcl::PointCloud<pcl::PointXYZI>);
     roi_filter.filter(*cloud_roi);
-
-    // VoxelGrid::PointCloudMsg2 downsampled_cloud_msg_rio;
-    // pcl::toROSMsg(*cloud_roi, downsampled_cloud_msg_rio);
-
-    // roi_sampling_pub_->publish(downsampled_cloud_msg_rio);
 
     if (voxel_condition)
     {

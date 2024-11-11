@@ -296,8 +296,6 @@ void dynamic_hybrid_path_planning_node::global_gridMapdata(const nav_msgs::msg::
     grid_map_ = std::make_shared<Grid_map>(rescaled_chunk);
     grid_map_->setcarData(car_data_);
 
-    std::cout << green << "-------> setup already" << reset << std::endl;
-
     if (grid_map_->isSingleStateCollisionFree(car_state_2))
     {
         RCLCPP_ERROR(this->get_logger(), "\033[1;31m --> car point is in collision or out of the map <-- \033[0m");
@@ -309,25 +307,6 @@ void dynamic_hybrid_path_planning_node::global_gridMapdata(const nav_msgs::msg::
         RCLCPP_ERROR(this->get_logger(), "\033[1;31m --> waypoint point is in collision or out of the map <-- \033[0m");
         return;
     }
-
-    hybridAstarPathPlanning();
-}
-
-void dynamic_hybrid_path_planning_node::obstacle_info_callback(const obstacles_information_msgs::msg::ObstacleCollection::SharedPtr msg)
-{
-    std::lock_guard<std::mutex> lock(obstacle_mutex_);
-    latest_obstacles_ = msg;
-}
-
-void dynamic_hybrid_path_planning_node::markerCallback(const visualization_msgs::msg::Marker::SharedPtr msg)
-{
-    waypoint_target_.x = msg->pose.position.x;
-    waypoint_target_.y = msg->pose.position.y;
-    tf2::Quaternion quat;
-    tf2::fromMsg(msg->pose.orientation, quat);
-    double roll, pitch, yaw;
-    tf2::Matrix3x3(quat).getRPY(roll, pitch, yaw);
-    waypoint_target_.heading = yaw;
 }
 
 void dynamic_hybrid_path_planning_node::hybridAstarPathPlanning()
@@ -489,6 +468,24 @@ void dynamic_hybrid_path_planning_node::Star_End_point_visualization()
     arrow_pub_->publish(arrow_states);
 
     start_goal_points_.clear();
+}
+
+// ============================== Callbacks ==============================
+void dynamic_hybrid_path_planning_node::obstacle_info_callback(const obstacles_information_msgs::msg::ObstacleCollection::SharedPtr msg)
+{
+    std::lock_guard<std::mutex> lock(obstacle_mutex_);
+    latest_obstacles_ = msg;
+}
+
+void dynamic_hybrid_path_planning_node::markerCallback(const visualization_msgs::msg::Marker::SharedPtr msg)
+{
+    waypoint_target_.x = msg->pose.position.x;
+    waypoint_target_.y = msg->pose.position.y;
+    tf2::Quaternion quat;
+    tf2::fromMsg(msg->pose.orientation, quat);
+    double roll, pitch, yaw;
+    tf2::Matrix3x3(quat).getRPY(roll, pitch, yaw);
+    waypoint_target_.heading = yaw;
 }
 
 int main(int argc, char **argv)
