@@ -74,8 +74,6 @@ private:
     // store start and goal point
     std::vector<State> start_goal_points_;
 
-    nav_msgs::msg::OccupancyGrid rescaled_chunk;
-
     // publishers & subscribers
     rclcpp::Subscription<nav_msgs::msg::OccupancyGrid>::SharedPtr global_grid_map_sub_;
     rclcpp::Subscription<obstacles_information_msgs::msg::ObstacleCollection>::SharedPtr obstacle_info_subscription_;
@@ -95,12 +93,22 @@ private:
     void hybridAstarPathPlanning();
     void Star_End_point_visualization();
 
+    // obstacle information mutex
     std::shared_ptr<obstacles_information_msgs::msg::ObstacleCollection> latest_obstacles_;
     std::mutex obstacle_mutex_;
+
+    // map data mutex
+    std::shared_ptr<nav_msgs::msg::OccupancyGrid> global_map_;
+    std::mutex map_mutex_;
+
+    // rescaled_chunk; mutex
+    std::shared_ptr<nav_msgs::msg::OccupancyGrid> rescaled_chunk_;
+    std::mutex rescaled_chunk_mutex_;
 
     // functions
     void getCurrentRobotState();
     // functions for map combination
+    void mapCombination();
     cv::Mat toMat(const nav_msgs::msg::OccupancyGrid &map);
     cv::Mat rescaleChunk(const cv::Mat &chunk_mat, double scale_factor);
 

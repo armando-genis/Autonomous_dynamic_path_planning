@@ -149,11 +149,15 @@ void pointcloud_clustering_node::convex_hull(std::vector<pcl::PointCloud<pcl::Po
 
             index++;
         }
-        if (!hull_markers.markers.empty())
-        {
-            // hull_publisher_->publish(hull_markers);
-            obstacle_info_publisher_->publish(obstacle_collection);
-        }
+    }
+    // Publish the convex hull
+    if (!obstacle_collection.obstacles.empty())
+    {
+        // hull_publisher_->publish(hull_markers);
+        // std::cout << yellow << "Convex hull markers published" << reset << std::endl;
+        // size of the obstacle collection
+        // std::cout << yellow << "Obstacle collection size: " << obstacle_collection.obstacles.size() << reset << std::endl;
+        obstacle_info_publisher_->publish(obstacle_collection);
     }
 }
 

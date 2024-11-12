@@ -15,6 +15,7 @@ public:
     double x{};
     double y{};
     double heading{};
+    double z{};
 
     double gridx{};
     double gridy{};

@@ -65,6 +65,7 @@ void dynamic_hybrid_path_planning_node::getCurrentRobotState()
         pose_tf = tf2_buffer.lookupTransform("map", "velodyne", tf2::TimePointZero).transform;
         car_state_.x = pose_tf.translation.x;
         car_state_.y = pose_tf.translation.y;
+        car_state_.z = pose_tf.translation.z - 1.55;
         tf2::Quaternion quat;
         tf2::fromMsg(pose_tf.rotation, quat);
         double roll, pitch, yaw;
@@ -85,51 +86,22 @@ void dynamic_hybrid_path_planning_node::getCurrentRobotState()
 
 void dynamic_hybrid_path_planning_node::timer_callback()
 {
-    // getCurrentRobotState();
-}
-
-cv::Mat dynamic_hybrid_path_planning_node::toMat(const nav_msgs::msg::OccupancyGrid &map)
-{
-    cv::Mat im(map.info.height, map.info.width, CV_8UC1);
-    for (size_t i = 0; i < map.data.size(); i++)
-    {
-        if (map.data[i] == 0)
-            im.data[i] = 254; // Free space
-        else if (map.data[i] == 100)
-            im.data[i] = 0; // Occupied space
-        else
-            im.data[i] = 205; // Unknown space
-    }
-    return im;
-}
-
-cv::Mat dynamic_hybrid_path_planning_node::rescaleChunk(const cv::Mat &chunk_mat, double scale_factor)
-{
-    cv::Mat rescaled_chunk;
-    cv::resize(chunk_mat, rescaled_chunk, cv::Size(), scale_factor, scale_factor, cv::INTER_NEAREST);
-    return rescaled_chunk;
-}
-
-// callback function for global grid map
-void dynamic_hybrid_path_planning_node::global_gridMapdata(const nav_msgs::msg::OccupancyGrid::SharedPtr map)
-{
-
     getCurrentRobotState();
+    mapCombination();
+    start_goal_points_.push_back(car_state_2);
+    start_goal_points_.push_back(waypoint_target_);
+    Star_End_point_visualization();
+}
 
-    // return if state is not available
-    if ((car_state_.x == 0.0 && car_state_.y == 0.0) || map->data.empty())
-    {
-        std::cout << red << "State or map data not available or car state not available" << reset << std::endl;
-        return;
-    }
-
+void dynamic_hybrid_path_planning_node::mapCombination()
+{
     // Retrieve the latest obstacle data
-    obstacles_information_msgs::msg::ObstacleCollection obstacles;
+    obstacles_information_msgs::msg::ObstacleCollection::SharedPtr obstacles;
     {
         std::lock_guard<std::mutex> lock(obstacle_mutex_);
         if (latest_obstacles_)
         {
-            obstacles = *latest_obstacles_;
+            obstacles = latest_obstacles_;
         }
         else
         {
@@ -139,27 +111,55 @@ void dynamic_hybrid_path_planning_node::global_gridMapdata(const nav_msgs::msg::
         }
     }
 
+    // Retrieve the latest global grid map data
+    nav_msgs::msg::OccupancyGrid::SharedPtr global_map;
+    {
+        std::lock_guard<std::mutex> lock(map_mutex_);
+        if (global_map_)
+        {
+            global_map = global_map_;
+        }
+        else
+        {
+            // No global grid map data available
+            std::cout << red << "No global grid map data available" << reset << std::endl;
+            return;
+        }
+    }
+
+    // mutex for rescaled_chunk_
+    std::lock_guard<std::mutex> lock(rescaled_chunk_mutex_);
+
+    if (!rescaled_chunk_)
+    {
+        rescaled_chunk_ = std::make_shared<nav_msgs::msg::OccupancyGrid>();
+        std::cout << green << "Mutex Rescaled chunk created" << reset << std::endl;
+    }
+
+    // auto init_time = std::chrono::system_clock::now();
+
     int chunk_size = 20; // 20 x 20 meters
     int chunk_radius = chunk_size / 2;
 
     // Convert car state to grid coordinates
-    int car_x_grid = static_cast<int>((car_state_.x - map->info.origin.position.x) / map->info.resolution);
-    int car_y_grid = static_cast<int>((car_state_.y - map->info.origin.position.y) / map->info.resolution);
+    int car_x_grid = (car_state_.x - global_map->info.origin.position.x) / global_map->info.resolution;
+    int car_y_grid = (car_state_.y - global_map->info.origin.position.y) / global_map->info.resolution;
 
     // Define chunk boundaries
     int min_x = std::max(0, car_x_grid - chunk_radius);
-    int max_x = std::min(static_cast<int>(map->info.width), car_x_grid + chunk_radius);
+    int max_x = std::min(static_cast<int>(global_map->info.width), car_x_grid + chunk_radius);
     int min_y = std::max(0, car_y_grid - chunk_radius);
-    int max_y = std::min(static_cast<int>(map->info.height), car_y_grid + chunk_radius);
+    int max_y = std::min(static_cast<int>(global_map->info.height), car_y_grid + chunk_radius);
 
     // Initialize the chunk grid
     nav_msgs::msg::OccupancyGrid chunk;
-    chunk.header = map->header;
-    chunk.info.resolution = map->info.resolution;
+    chunk.header = global_map->header;
+    chunk.info.resolution = global_map->info.resolution;
     chunk.info.width = max_x - min_x;
     chunk.info.height = max_y - min_y;
-    chunk.info.origin.position.x = map->info.origin.position.x + min_x * map->info.resolution;
-    chunk.info.origin.position.y = map->info.origin.position.y + min_y * map->info.resolution;
+    chunk.info.origin.position.x = global_map->info.origin.position.x + min_x * global_map->info.resolution;
+    chunk.info.origin.position.y = global_map->info.origin.position.y + min_y * global_map->info.resolution;
+    // chunk.info.origin.position.z = car_state_.z;
     chunk.info.origin.orientation.w = 1.0;
 
     chunk.data.resize(chunk.info.width * chunk.info.height, 0);
@@ -168,45 +168,45 @@ void dynamic_hybrid_path_planning_node::global_gridMapdata(const nav_msgs::msg::
     {
         for (int x = min_x; x < max_x; ++x)
         {
-            int global_index = y * map->info.width + x;
+            int global_index = y * global_map->info.width + x;
             int local_x = x - min_x;
             int local_y = y - min_y;
             int chunk_index = local_y * chunk.info.width + local_x;
 
-            chunk.data[chunk_index] = map->data[global_index];
+            chunk.data[chunk_index] = global_map->data[global_index];
         }
     }
 
-    double scale_factor = 10;
+    double scale_factor = 3.33;
     cv::Mat chunk_mat = toMat(chunk);
     cv::Mat rescaled_chunk_mat = rescaleChunk(chunk_mat, scale_factor);
 
-    // nav_msgs::msg::OccupancyGrid rescaled_chunk;
-    rescaled_chunk.header = map->header;
-    rescaled_chunk.info.resolution = 0.1;
-    rescaled_chunk.info.width = rescaled_chunk_mat.cols;
-    rescaled_chunk.info.height = rescaled_chunk_mat.rows;
-    rescaled_chunk.info.origin.position.x = chunk.info.origin.position.x;
-    rescaled_chunk.info.origin.position.y = chunk.info.origin.position.y;
-    rescaled_chunk.info.origin.orientation.w = 1.0;
+    rescaled_chunk_->header = global_map->header;
+    rescaled_chunk_->info.resolution = 0.3;
+    rescaled_chunk_->info.width = rescaled_chunk_mat.cols;
+    rescaled_chunk_->info.height = rescaled_chunk_mat.rows;
+    rescaled_chunk_->info.origin.position.x = chunk.info.origin.position.x;
+    rescaled_chunk_->info.origin.position.y = chunk.info.origin.position.y;
+    rescaled_chunk_->info.origin.position.z = car_state_.z;
+    rescaled_chunk_->info.origin.orientation.w = 1.0;
 
-    rescaled_chunk.data.resize(rescaled_chunk.info.width * rescaled_chunk.info.height, 0); // Initialize all cells as free
+    rescaled_chunk_->data.resize(rescaled_chunk_->info.width * rescaled_chunk_->info.height, 0);
 
     for (int i = 0; i < rescaled_chunk_mat.rows * rescaled_chunk_mat.cols; i++)
     {
         if (rescaled_chunk_mat.data[i] == 254)
-            rescaled_chunk.data[i] = 0;
+            rescaled_chunk_->data[i] = 0;
         else if (rescaled_chunk_mat.data[i] == 0)
-            rescaled_chunk.data[i] = 100;
+            rescaled_chunk_->data[i] = 100;
         else
-            rescaled_chunk.data[i] = -1;
+            rescaled_chunk_->data[i] = -1;
     }
 
     auto mark_grid = [&](int x, int y, int value)
     {
-        if (x >= 0 && x < static_cast<int>(rescaled_chunk.info.width) && y >= 0 && y < static_cast<int>(rescaled_chunk.info.height))
+        if (x >= 0 && x < static_cast<int>(rescaled_chunk_->info.width) && y >= 0 && y < static_cast<int>(rescaled_chunk_->info.height))
         {
-            rescaled_chunk.data[y * rescaled_chunk.info.width + x] = value; // Mark the cell
+            rescaled_chunk_->data[y * rescaled_chunk_->info.width + x] = value; // Mark the cell
         }
     };
 
@@ -251,16 +251,16 @@ void dynamic_hybrid_path_planning_node::global_gridMapdata(const nav_msgs::msg::
         }
     };
 
-    int inflation_radius = 3; // Inflated cells around the obstacles
+    int inflation_radius = 1; // Inflated cells around the obstacles
     int value_to_mark = 100;
 
     // Transformation from lidar frame to map frame
     double cos_heading = cos(car_state_.heading);
     double sin_heading = sin(car_state_.heading);
 
-    for (size_t i = 0; i < obstacles.obstacles.size(); ++i)
+    for (size_t i = 0; i < obstacles->obstacles.size(); ++i)
     {
-        const auto &obstacle = obstacles.obstacles[i];
+        const auto &obstacle = obstacles->obstacles[i];
         for (size_t j = 0; j < obstacle.polygon.points.size(); ++j)
         {
             auto &current_point_lidar = obstacle.polygon.points[j];
@@ -274,47 +274,29 @@ void dynamic_hybrid_path_planning_node::global_gridMapdata(const nav_msgs::msg::
             next_point_map.x = car_state_.x + cos_heading * next_point_lidar.x - sin_heading * next_point_lidar.y;
             next_point_map.y = car_state_.y + sin_heading * next_point_lidar.x + cos_heading * next_point_lidar.y;
 
-            int x0 = static_cast<int>((current_point_map.x - rescaled_chunk.info.origin.position.x) / rescaled_chunk.info.resolution);
-            int y0 = static_cast<int>((current_point_map.y - rescaled_chunk.info.origin.position.y) / rescaled_chunk.info.resolution);
-            int x1 = static_cast<int>((next_point_map.x - rescaled_chunk.info.origin.position.x) / rescaled_chunk.info.resolution);
-            int y1 = static_cast<int>((next_point_map.y - rescaled_chunk.info.origin.position.y) / rescaled_chunk.info.resolution);
+            int x0 = static_cast<int>((current_point_map.x - rescaled_chunk_->info.origin.position.x) / rescaled_chunk_->info.resolution);
+            int y0 = static_cast<int>((current_point_map.y - rescaled_chunk_->info.origin.position.y) / rescaled_chunk_->info.resolution);
+            int x1 = static_cast<int>((next_point_map.x - rescaled_chunk_->info.origin.position.x) / rescaled_chunk_->info.resolution);
+            int y1 = static_cast<int>((next_point_map.y - rescaled_chunk_->info.origin.position.y) / rescaled_chunk_->info.resolution);
 
             draw_inflated_line(x0, y0, x1, y1, inflation_radius, value_to_mark);
         }
     }
 
-    occupancy_grid_pub_test_->publish(rescaled_chunk);
+    // publish the chunk
+    occupancy_grid_pub_test_->publish(*rescaled_chunk_);
 
-    // if map is not available
-    if (rescaled_chunk.data.empty())
-    {
-        std::cout << red << "Map data not available" << reset << std::endl;
-        return;
-    }
-
-    // Hybrid A* Path Planning
-    grid_map_ = std::make_shared<Grid_map>(rescaled_chunk);
-    grid_map_->setcarData(car_data_);
-
-    if (grid_map_->isSingleStateCollisionFree(car_state_2))
-    {
-        RCLCPP_ERROR(this->get_logger(), "\033[1;31m --> car point is in collision or out of the map <-- \033[0m");
-        return;
-    }
-
-    if (grid_map_->isSingleStateCollisionFree(waypoint_target_))
-    {
-        RCLCPP_ERROR(this->get_logger(), "\033[1;31m --> waypoint point is in collision or out of the map <-- \033[0m");
-        return;
-    }
+    // auto end_time = std::chrono::system_clock::now();
+    // auto duration = std::chrono::duration_cast<std::chrono::milliseconds>(end_time - init_time).count();
+    // std::cout << blue << "Execution time holonomic: " << duration << " ms" << reset << std::endl;
 }
 
 void dynamic_hybrid_path_planning_node::hybridAstarPathPlanning()
 {
-    start_goal_points_.push_back(car_state_2);
-    start_goal_points_.push_back(waypoint_target_);
+    // start_goal_points_.push_back(car_state_2);
+    // start_goal_points_.push_back(waypoint_target_);
 
-    Star_End_point_visualization();
+    // Star_End_point_visualization();
 
     HybridAstar hybrid_astar(*grid_map_, car_data_, pathLength, step_car);
     auto goal_trajectory = hybrid_astar.run(car_state_2, waypoint_target_);
@@ -477,6 +459,12 @@ void dynamic_hybrid_path_planning_node::obstacle_info_callback(const obstacles_i
     latest_obstacles_ = msg;
 }
 
+void dynamic_hybrid_path_planning_node::global_gridMapdata(const nav_msgs::msg::OccupancyGrid::SharedPtr map)
+{
+    std::lock_guard<std::mutex> lock(map_mutex_);
+    global_map_ = map;
+}
+
 void dynamic_hybrid_path_planning_node::markerCallback(const visualization_msgs::msg::Marker::SharedPtr msg)
 {
     waypoint_target_.x = msg->pose.position.x;
@@ -486,6 +474,30 @@ void dynamic_hybrid_path_planning_node::markerCallback(const visualization_msgs:
     double roll, pitch, yaw;
     tf2::Matrix3x3(quat).getRPY(roll, pitch, yaw);
     waypoint_target_.heading = yaw;
+}
+
+// ============================== Main Function for map rescale ==============================
+cv::Mat
+dynamic_hybrid_path_planning_node::toMat(const nav_msgs::msg::OccupancyGrid &map)
+{
+    cv::Mat im(map.info.height, map.info.width, CV_8UC1);
+    for (size_t i = 0; i < map.data.size(); i++)
+    {
+        if (map.data[i] == 0)
+            im.data[i] = 254; // Free space
+        else if (map.data[i] == 100)
+            im.data[i] = 0; // Occupied space
+        else
+            im.data[i] = 205; // Unknown space
+    }
+    return im;
+}
+
+cv::Mat dynamic_hybrid_path_planning_node::rescaleChunk(const cv::Mat &chunk_mat, double scale_factor)
+{
+    cv::Mat rescaled_chunk;
+    cv::resize(chunk_mat, rescaled_chunk, cv::Size(), scale_factor, scale_factor, cv::INTER_NEAREST);
+    return rescaled_chunk;
 }
 
 int main(int argc, char **argv)
