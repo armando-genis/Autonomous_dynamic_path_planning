@@ -25,6 +25,7 @@ local_path_planning_node::local_path_planning_node(/* args */) : Node("local_pat
     waypoints = std::make_shared<vector<Eigen::VectorXd>>();
     car_state_ = std::make_shared<State>();
     road_elements_ = std::make_shared<traffic_information_msgs::msg::RoadElementsCollection>();
+    waypoints_segmentation = std::make_shared<vector<Eigen::VectorXd>>();
 
     RCLCPP_INFO(this->get_logger(), "\033[1;32m----> local_path_planning_node initialized.\033[0m");
 }
@@ -33,99 +34,89 @@ local_path_planning_node::~local_path_planning_node()
 {
 }
 
-double local_path_planning_node::calculateDistance(double x1, double y1, double x2, double y2)
-{
-    return std::sqrt(std::pow(x2 - x1, 2) + std::pow(y2 - y1, 2));
-}
-
 void local_path_planning_node::roadElementsCallback(const traffic_information_msgs::msg::RoadElementsCollection::SharedPtr msg)
 {
-    // # RoadElementsCollection.msg
-    // std_msgs/Header header
-    // traffic_information_msgs / RoadElements[] polygons
 
-    // # RoadElements.msg
-    // polygon_msgs / Point2D[] points
-    // int32 id
-    // string type
+    // auto init_time = std::chrono::system_clock::now();
 
     if (waypoints->empty())
     {
         std::cout << red << "Warning: waypoints is not available. Skipping collision check." << reset << std::endl;
         return;
     }
+    road_elements_ = msg;
+    waypoints_segmentation->clear();
 
-    double min_distance = std::numeric_limits<double>::max();
-    traffic_information_msgs::msg::RoadElements nearest_crosswalk;
-    visualization_msgs::msg::MarkerArray marker_array;
+    traffic_information_msgs::msg::RoadElements first_crosswalk;
+    bool found_first_crosswalk = false;
 
-    for (const auto &element : msg->polygons)
+    // Pre-define a 1x1 meter square polygon at the origin
+    geometry_msgs::msg::Polygon base_square;
+    std::vector<std::pair<double, double>> square_offsets = {{-0.5, -0.5}, {0.5, -0.5}, {0.5, 0.5}, {-0.5, 0.5}};
+    for (const auto &offset : square_offsets)
     {
-        if (element.type == "crosswalk")
+        geometry_msgs::msg::Point32 p;
+        p.x = offset.first;
+        p.y = offset.second;
+        base_square.points.push_back(p);
+    }
+    // Close the square by connecting back to the first point
+    base_square.points.push_back(base_square.points[0]);
+
+    for (const auto &waypoint : *waypoints) // Go through waypoints in sequence
+    {
+        double x = waypoint(0); // x position of the waypoint
+        double y = waypoint(1); // y position of the waypoint
+
+        waypoints_segmentation->push_back(waypoint);
+
+        // Create a translated square polygon around the current waypoint
+        geometry_msgs::msg::Polygon waypoint_poly = base_square;
+        for (auto &point : waypoint_poly.points)
         {
-            double cx = 0.0;
-            double cy = 0.0;
-            int n = element.points.size();
-
-            for (const auto &point : element.points)
-            {
-                cx += point.x;
-                cy += point.y;
-            }
-            cx /= n;
-            cy /= n;
-
-            visualization_msgs::msg::Marker marker;
-            marker.header.frame_id = "map"; // Replace with appropriate frame if different
-            marker.header.stamp = this->now();
-            marker.ns = "crosswalk_centers";
-            marker.id = element.id;
-            marker.type = visualization_msgs::msg::Marker::TEXT_VIEW_FACING;
-            marker.action = visualization_msgs::msg::Marker::ADD;
-            marker.pose.position.x = cx;
-            marker.pose.position.y = cy;
-            marker.pose.position.z = 1.0; // Adjust height if necessary
-            marker.scale.z = 1.0;         // Text height
-            marker.color.a = 1.0;
-            marker.color.r = 1.0;
-            marker.color.g = 1.0;
-            marker.color.b = 1.0;
-
-            // Set text to display the crosswalk ID and center coordinates
-            marker.text = "ID: " + std::to_string(element.id) +
-                          "\n(" + std::to_string(cx) + ", " + std::to_string(cy) + ")";
-
-            // Add marker to marker array
-            marker_array.markers.push_back(marker);
+            point.x += x;
+            point.y += y;
         }
+
+        for (const auto &element : msg->polygons)
+        {
+            // if (element.type == "crosswalk" && element.id != 363 && element.id != 391 && element.id != 572 && element.id != 638 && element.id != 631)
+            if (element.type == "crosswalk" && std::find(skip_ids.begin(), skip_ids.end(), element.id) == skip_ids.end())
+            {
+                // Create a polygon from the crosswalk points
+                geometry_msgs::msg::Polygon obstacle_poly;
+                for (const auto &point : element.points)
+                {
+                    geometry_msgs::msg::Point32 p;
+                    p.x = point.x;
+                    p.y = point.y;
+                    obstacle_poly.points.push_back(p);
+                }
+
+                // Check for collision only if the crosswalk is near the waypoint (e.g., within 5 meters)
+                if (std::abs(element.points[0].x - x) < 5 && std::abs(element.points[0].y - y) < 5)
+                {
+                    bool current_collision = collision_checker.check_collision(waypoint_poly, obstacle_poly);
+
+                    if (current_collision)
+                    {
+                        first_crosswalk = element;
+                        found_first_crosswalk = true;
+                        break;
+                    }
+                }
+            }
+        }
+        if (found_first_crosswalk)
+            break;
     }
 
-    const auto &first_waypoint = waypoints->at(0); // First waypoint position
-    visualization_msgs::msg::Marker first_waypoint_marker;
-    first_waypoint_marker.header.frame_id = "map"; // Replace with appropriate frame if different
-    first_waypoint_marker.header.stamp = this->now();
-    first_waypoint_marker.ns = "waypoints";
-    first_waypoint_marker.id = 0; // Unique ID
-    first_waypoint_marker.type = visualization_msgs::msg::Marker::TEXT_VIEW_FACING;
-    first_waypoint_marker.action = visualization_msgs::msg::Marker::ADD;
-    first_waypoint_marker.pose.position.x = first_waypoint[0];
-    first_waypoint_marker.pose.position.y = first_waypoint[1];
-    first_waypoint_marker.pose.position.z = 1.5; // Adjust height if necessary
-    first_waypoint_marker.scale.z = 1.0;         // Text height
-    first_waypoint_marker.color.a = 1.0;
-    first_waypoint_marker.color.r = 0.0;
-    first_waypoint_marker.color.g = 1.0;
-    first_waypoint_marker.color.b = 0.0;
+    // Output the ID of the nearest crosswalk
+    cout << "First crosswalk id: " << first_crosswalk.id << endl;
 
-    // Set text to "First" to label the first waypoint
-    first_waypoint_marker.text = "First";
-
-    // Add first waypoint marker to marker array
-    marker_array.markers.push_back(first_waypoint_marker);
-
-    // cout the id of the nearest crosswalk
-    cout << "Nearest crosswalk id: " << nearest_crosswalk.id << endl;
-    crosswalk_marker_publisher_->publish(marker_array);
+    // auto end_time = std::chrono::system_clock::now();
+    // auto duration = std::chrono::duration_cast<std::chrono::milliseconds>(end_time - init_time).count();
+    // cout << blue << "Execution time for path creation: " << duration << " ms" << reset << endl;
 }
 
 void local_path_planning_node::getCurrentRobotState()

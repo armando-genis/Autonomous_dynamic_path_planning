@@ -61,9 +61,12 @@ private:
     std::shared_ptr<std::vector<bool>> collision_vector;
     std::shared_ptr<geometry_msgs::msg::Polygon> vehicle_path;
     std::shared_ptr<geometry_msgs::msg::Polygon> segment_path;
-    std::shared_ptr<vector<Eigen::VectorXd>> waypoints; // [x, y, yaw]
+    std::shared_ptr<vector<Eigen::VectorXd>> waypoints;              // [x, y, yaw]
+    std::shared_ptr<vector<Eigen::VectorXd>> waypoints_segmentation; // [x, y, yaw]
     std::shared_ptr<State> car_state_;
     std::shared_ptr<traffic_information_msgs::msg::RoadElementsCollection> road_elements_;
+
+    std::vector<int> skip_ids = {363, 391, 572, 638, 631};
 
     // tf2 buffer & listener
     tf2_ros::Buffer tf2_buffer;
@@ -81,9 +84,6 @@ private:
     // functions to calculate the trajectory of the car
     vector<pair<double, double>> calculate_trajectory(double steering_angle, double wheelbase, int num_points);
     void extract_segment(const std::vector<std::pair<double, double>> &path, std::vector<double> &segment_x, std::vector<double> &segment_y, double length);
-
-    // function to calculate the next element of the path to get a segment of the trajectory
-    double calculateDistance(double x1, double y1, double x2, double y2);
 
     // Subscribers for the obstacle information
     rclcpp::Subscription<obstacles_information_msgs::msg::ObstacleCollection>::SharedPtr obstacle_info_subscription_;
