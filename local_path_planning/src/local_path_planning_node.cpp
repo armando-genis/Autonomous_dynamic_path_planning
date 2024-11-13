@@ -26,6 +26,7 @@ local_path_planning_node::local_path_planning_node(/* args */) : Node("local_pat
     car_state_ = std::make_shared<State>();
     road_elements_ = std::make_shared<traffic_information_msgs::msg::RoadElementsCollection>();
     waypoints_segmentation = std::make_shared<vector<Eigen::VectorXd>>();
+    waypoints_historical = std::make_shared<vector<Eigen::VectorXd>>();
 
     RCLCPP_INFO(this->get_logger(), "\033[1;32m----> local_path_planning_node initialized.\033[0m");
 }
@@ -34,89 +35,28 @@ local_path_planning_node::~local_path_planning_node()
 {
 }
 
-void local_path_planning_node::roadElementsCallback(const traffic_information_msgs::msg::RoadElementsCollection::SharedPtr msg)
+void local_path_planning_node::crosswalk_visited_check(const traffic_information_msgs::msg::RoadElements &crosswalk)
 {
+    double center_x = 0.0;
+    double center_y = 0.0;
+    int num_points = crosswalk.points.size();
 
-    // auto init_time = std::chrono::system_clock::now();
-
-    if (waypoints->empty())
+    for (const auto &point : crosswalk.points)
     {
-        std::cout << red << "Warning: waypoints is not available. Skipping collision check." << reset << std::endl;
-        return;
+        center_x += point.x;
+        center_y += point.y;
     }
-    road_elements_ = msg;
-    waypoints_segmentation->clear();
+    center_x /= num_points;
+    center_y /= num_points;
 
-    traffic_information_msgs::msg::RoadElements first_crosswalk;
-    bool found_first_crosswalk = false;
-
-    // Pre-define a 1x1 meter square polygon at the origin
-    geometry_msgs::msg::Polygon base_square;
-    std::vector<std::pair<double, double>> square_offsets = {{-0.5, -0.5}, {0.5, -0.5}, {0.5, 0.5}, {-0.5, 0.5}};
-    for (const auto &offset : square_offsets)
+    // Check for collision only if the crosswalk is near the the car (e.g., within 3 meters)
+    // if (std::abs(crosswalk.points[0].x - car_state_->x) < 5 && std::abs(crosswalk.points[0].y - car_state_->y) < 5)
+    if (std::abs(center_x - car_state_->x) < 5 && std::abs(center_y - car_state_->y) < 5)
     {
-        geometry_msgs::msg::Point32 p;
-        p.x = offset.first;
-        p.y = offset.second;
-        base_square.points.push_back(p);
+        // append the element id to the list of visited crosswalks
+        skip_ids.push_back(crosswalk.id);
+        segment_start_index_temp = segment_start_index;
     }
-    // Close the square by connecting back to the first point
-    base_square.points.push_back(base_square.points[0]);
-
-    for (const auto &waypoint : *waypoints) // Go through waypoints in sequence
-    {
-        double x = waypoint(0); // x position of the waypoint
-        double y = waypoint(1); // y position of the waypoint
-
-        waypoints_segmentation->push_back(waypoint);
-
-        // Create a translated square polygon around the current waypoint
-        geometry_msgs::msg::Polygon waypoint_poly = base_square;
-        for (auto &point : waypoint_poly.points)
-        {
-            point.x += x;
-            point.y += y;
-        }
-
-        for (const auto &element : msg->polygons)
-        {
-            // if (element.type == "crosswalk" && element.id != 363 && element.id != 391 && element.id != 572 && element.id != 638 && element.id != 631)
-            if (element.type == "crosswalk" && std::find(skip_ids.begin(), skip_ids.end(), element.id) == skip_ids.end())
-            {
-                // Create a polygon from the crosswalk points
-                geometry_msgs::msg::Polygon obstacle_poly;
-                for (const auto &point : element.points)
-                {
-                    geometry_msgs::msg::Point32 p;
-                    p.x = point.x;
-                    p.y = point.y;
-                    obstacle_poly.points.push_back(p);
-                }
-
-                // Check for collision only if the crosswalk is near the waypoint (e.g., within 5 meters)
-                if (std::abs(element.points[0].x - x) < 5 && std::abs(element.points[0].y - y) < 5)
-                {
-                    bool current_collision = collision_checker.check_collision(waypoint_poly, obstacle_poly);
-
-                    if (current_collision)
-                    {
-                        first_crosswalk = element;
-                        found_first_crosswalk = true;
-                        break;
-                    }
-                }
-            }
-        }
-        if (found_first_crosswalk)
-            break;
-    }
-
-    // Output the ID of the nearest crosswalk
-    cout << "First crosswalk id: " << first_crosswalk.id << endl;
-
-    // auto end_time = std::chrono::system_clock::now();
-    // auto duration = std::chrono::duration_cast<std::chrono::milliseconds>(end_time - init_time).count();
-    // cout << blue << "Execution time for path creation: " << duration << " ms" << reset << endl;
 }
 
 void local_path_planning_node::getCurrentRobotState()
@@ -133,12 +73,54 @@ void local_path_planning_node::getCurrentRobotState()
         double roll, pitch, yaw;
         tf2::Matrix3x3(quat).getRPY(roll, pitch, yaw);
         car_state_->heading = yaw;
+
+        compute_closest_waypoint();
     }
 
     catch (tf2::TransformException &ex)
     {
         std::cout << red << "Transform error: " << ex.what() << reset << std::endl;
     }
+}
+
+void local_path_planning_node::compute_closest_waypoint()
+{
+
+    if (waypoints->empty())
+    {
+        std::cout << red << "Warning: waypoints is not available. Skipping close waypoint computation." << reset << std::endl;
+        return;
+    }
+
+    constexpr size_t first_wp = 0;
+    const size_t last_wp = waypoints->size() - 1;
+    constexpr int search_offset_back = 5;
+    constexpr int search_offset_forward = 15;
+
+    int search_start = std::max(static_cast<int>(closest_waypoint) - search_offset_back, static_cast<int>(first_wp));
+    int search_end = std::min(static_cast<int>(closest_waypoint) + search_offset_forward, static_cast<int>(last_wp));
+
+    double smallest_curr_distance = std::numeric_limits<double>::max();
+
+    for (int i = search_start; i <= search_end; i++)
+    {
+        double curr_distance = getDistanceFromOdom(waypoints->at(i));
+        if (smallest_curr_distance > curr_distance)
+        {
+            closest_waypoint = i;
+            smallest_curr_distance = curr_distance;
+        }
+    }
+}
+
+double local_path_planning_node::getDistanceFromOdom(Eigen::VectorXd wapointPoint)
+{
+    double x1 = wapointPoint(0);
+    double y1 = wapointPoint(1);
+    double x2 = car_state_->x;
+    double y2 = car_state_->y;
+    double distance = sqrt(pow(x1 - x2, 2) + pow(y1 - y2, 2));
+    return distance;
 }
 
 void local_path_planning_node::waypoints_callback(const visualization_msgs::msg::MarkerArray::SharedPtr msg)
@@ -167,6 +149,225 @@ void local_path_planning_node::waypoints_callback(const visualization_msgs::msg:
 
         waypoints->push_back(waypoint);
     }
+}
+
+vector<pair<double, double>> local_path_planning_node::calculate_trajectory(double steering_angle, double wheelbase, int num_points)
+{
+    vector<pair<double, double>> path;
+
+    if (fabs(steering_angle) < 1e-6)
+    {
+        double step_length = 0.5;
+        for (int i = 0; i < num_points; ++i)
+        {
+            path.push_back(make_pair(start_offset + i * step_length, 0.0));
+        }
+    }
+    else
+    {
+        double radius = wheelbase / tan(fabs(steering_angle));
+        double angular_step = M_PI / 2 / num_points;
+
+        double theta = 0; // Starting angle
+        for (int i = 0; i <= num_points; ++i)
+        {
+            double x = radius * sin(theta) + start_offset; // Start 0.5 meters in front
+            double y = radius * (1 - cos(theta));
+
+            if (steering_angle < 0)
+            {
+                y = -y;
+            }
+
+            path.push_back(make_pair(x, y));
+            theta += angular_step;
+        }
+    }
+
+    return path;
+}
+
+void local_path_planning_node::extract_segment(const std::vector<std::pair<double, double>> &path, std::vector<double> &segment_x, std::vector<double> &segment_y, double length)
+{
+    if (path.empty())
+        return;
+
+    segment_x.push_back(path.front().first);
+    segment_y.push_back(path.front().second);
+
+    double accumulated_length = 0.0;
+    double previous_x = path.front().first;
+    double previous_y = path.front().second;
+
+    for (size_t i = 1; i < path.size() && accumulated_length < length; ++i)
+    {
+        double current_x = path[i].first;
+        double current_y = path[i].second;
+
+        double dx = current_x - previous_x;
+        double dy = current_y - previous_y;
+        double segment_length = sqrt(dx * dx + dy * dy);
+
+        accumulated_length += segment_length;
+
+        if (accumulated_length >= length)
+        {
+            double excess_length = accumulated_length - length;
+            double ratio = segment_length > 0 ? (segment_length - excess_length) / segment_length : 0;
+            current_x = previous_x + ratio * dx;
+            current_y = previous_y + ratio * dy;
+
+            segment_x.push_back(current_x);
+            segment_y.push_back(current_y);
+            break;
+        }
+        else
+        {
+            segment_x.push_back(current_x);
+            segment_y.push_back(current_y);
+            previous_x = current_x;
+            previous_y = current_y;
+        }
+    }
+}
+
+// callback functions
+void local_path_planning_node::roadElementsCallback(const traffic_information_msgs::msg::RoadElementsCollection::SharedPtr msg)
+{
+
+    getCurrentRobotState();
+
+    if (waypoints->empty())
+    {
+        std::cout << red << "Warning: waypoints is not available. Skipping collision check." << reset << std::endl;
+        return;
+    }
+
+    waypoints_segmentation->clear();
+
+    traffic_information_msgs::msg::RoadElements first_crosswalk;
+    bool found_first_crosswalk = false;
+
+    // Pre-define a 1x1 meter square polygon at the origin
+    geometry_msgs::msg::Polygon base_square;
+    std::vector<std::pair<double, double>> square_offsets = {{-0.5, -0.5}, {0.5, -0.5}, {0.5, 0.5}, {-0.5, 0.5}};
+    for (const auto &offset : square_offsets)
+    {
+        geometry_msgs::msg::Point32 p;
+        p.x = offset.first;
+        p.y = offset.second;
+        base_square.points.push_back(p);
+    }
+    // Close the square by connecting back to the first point
+    base_square.points.push_back(base_square.points[0]);
+
+    for (size_t i = closest_waypoint; i < waypoints->size(); ++i) // Go through waypoints in sequence
+    {
+        const auto &waypoint = waypoints->at(i);
+        double x = waypoint(0);
+        double y = waypoint(1);
+
+        // push bach of the waypoints are btw segment_start_index_temp and segment_start_index
+        if (i >= segment_start_index_temp && i <= segment_start_index)
+        {
+            waypoints_segmentation->push_back(waypoint);
+        }
+
+        // Create a translated square polygon around the current waypoint
+        geometry_msgs::msg::Polygon waypoint_poly = base_square;
+        for (auto &point : waypoint_poly.points)
+        {
+            point.x += x;
+            point.y += y;
+        }
+
+        for (const auto &element : msg->polygons)
+        {
+            // if (element.type == "crosswalk" && element.id != 363 && element.id != 391 && element.id != 572 && element.id != 638 && element.id != 631)
+            if (element.type == "crosswalk" && std::find(skip_ids.begin(), skip_ids.end(), element.id) == skip_ids.end())
+            {
+                // Create a polygon from the crosswalk points
+                geometry_msgs::msg::Polygon obstacle_poly;
+                for (const auto &point : element.points)
+                {
+                    geometry_msgs::msg::Point32 p;
+                    p.x = point.x;
+                    p.y = point.y;
+                    obstacle_poly.points.push_back(p);
+                }
+
+                // Check for collision only if the crosswalk is near the waypoint (e.g., within 5 meters)
+                // when the crosswalk is bigger than the waypoint i do not now it thi will work
+                if (std::abs(element.points[0].x - x) < 5 && std::abs(element.points[0].y - y) < 5)
+                {
+                    bool current_collision = collision_checker.check_collision(waypoint_poly, obstacle_poly);
+
+                    if (current_collision)
+                    {
+                        first_crosswalk = element;
+                        found_first_crosswalk = true;
+                        segment_start_index = i;
+                        break;
+                    }
+                }
+            }
+        }
+        if (found_first_crosswalk)
+        {
+            break;
+        }
+    }
+
+    // check if the crosswalk has been visited
+    crosswalk_visited_check(first_crosswalk);
+
+    // Output the ID of the nearest crosswalk
+    cout << "First crosswalk id: " << first_crosswalk.id << endl;
+    cout << "Segment start index: " << segment_start_index << endl;
+    cout << "Segment start index temp: " << segment_start_index_temp << endl;
+
+    // Create and publish the MarkerArray for the segmented waypoints
+    visualization_msgs::msg::MarkerArray marker_array;
+    int marker_id = 0;
+
+    for (const auto &waypoint : *waypoints_segmentation)
+    {
+        visualization_msgs::msg::Marker marker;
+        marker.header.frame_id = "map"; // Set your frame of reference
+        marker.header.stamp = this->now();
+        marker.ns = "waypoints";
+        marker.id = marker_id++; // Unique ID for each marker
+        marker.type = visualization_msgs::msg::Marker::SPHERE;
+        marker.action = visualization_msgs::msg::Marker::ADD;
+
+        // Set the position from the waypoint
+        marker.pose.position.x = waypoint(0);
+        marker.pose.position.y = waypoint(1);
+        marker.pose.position.z = 0.0; // Assuming 2D waypoints
+
+        // Set the orientation from the yaw in waypoint(3)
+        tf2::Quaternion q;
+        q.setRPY(0, 0, waypoint(3));
+        marker.pose.orientation.x = q.x();
+        marker.pose.orientation.y = q.y();
+        marker.pose.orientation.z = q.z();
+        marker.pose.orientation.w = q.w();
+
+        // Set the scale of the marker
+        marker.scale.x = 0.3;
+        marker.scale.y = 0.3;
+        marker.scale.z = 0.3;
+
+        // Set the color of the marker
+        marker.color.r = 0.0f;
+        marker.color.g = 1.0f;
+        marker.color.b = 0.0f;
+        marker.color.a = 1.0f; // Fully opaque
+
+        marker_array.markers.push_back(marker);
+    }
+
+    crosswalk_marker_publisher_->publish(marker_array);
 }
 
 void local_path_planning_node::obstacle_info_callback(const obstacles_information_msgs::msg::ObstacleCollection::SharedPtr msg)
@@ -284,86 +485,6 @@ void local_path_planning_node::yawCarCallback(const std_msgs::msg::Float64::Shar
     // cout << blue << "Execution time for path creation: " << duration << " ms" << reset << endl;
 
     lane_steering_publisher_->publish(lane_maker);
-}
-
-vector<pair<double, double>> local_path_planning_node::calculate_trajectory(double steering_angle, double wheelbase, int num_points)
-{
-    vector<pair<double, double>> path;
-
-    if (fabs(steering_angle) < 1e-6)
-    {
-        double step_length = 0.5;
-        for (int i = 0; i < num_points; ++i)
-        {
-            path.push_back(make_pair(start_offset + i * step_length, 0.0));
-        }
-    }
-    else
-    {
-        double radius = wheelbase / tan(fabs(steering_angle));
-        double angular_step = M_PI / 2 / num_points;
-
-        double theta = 0; // Starting angle
-        for (int i = 0; i <= num_points; ++i)
-        {
-            double x = radius * sin(theta) + start_offset; // Start 0.5 meters in front
-            double y = radius * (1 - cos(theta));
-
-            if (steering_angle < 0)
-            {
-                y = -y;
-            }
-
-            path.push_back(make_pair(x, y));
-            theta += angular_step;
-        }
-    }
-
-    return path;
-}
-
-void local_path_planning_node::extract_segment(const std::vector<std::pair<double, double>> &path, std::vector<double> &segment_x, std::vector<double> &segment_y, double length)
-{
-    if (path.empty())
-        return;
-
-    segment_x.push_back(path.front().first);
-    segment_y.push_back(path.front().second);
-
-    double accumulated_length = 0.0;
-    double previous_x = path.front().first;
-    double previous_y = path.front().second;
-
-    for (size_t i = 1; i < path.size() && accumulated_length < length; ++i)
-    {
-        double current_x = path[i].first;
-        double current_y = path[i].second;
-
-        double dx = current_x - previous_x;
-        double dy = current_y - previous_y;
-        double segment_length = sqrt(dx * dx + dy * dy);
-
-        accumulated_length += segment_length;
-
-        if (accumulated_length >= length)
-        {
-            double excess_length = accumulated_length - length;
-            double ratio = segment_length > 0 ? (segment_length - excess_length) / segment_length : 0;
-            current_x = previous_x + ratio * dx;
-            current_y = previous_y + ratio * dy;
-
-            segment_x.push_back(current_x);
-            segment_y.push_back(current_y);
-            break;
-        }
-        else
-        {
-            segment_x.push_back(current_x);
-            segment_y.push_back(current_y);
-            previous_x = current_x;
-            previous_y = current_y;
-        }
-    }
 }
 
 int main(int argc, char **argv)

@@ -99,8 +99,6 @@ private:
     // map data
     std::shared_ptr<nav_msgs::msg::OccupancyGrid> global_map_;
 
-    nav_mgs::msg::OccupancyGrid path_;
-
     // rescaled_chunk; mutex
     std::shared_ptr<nav_msgs::msg::OccupancyGrid> rescaled_chunk_;
     std::mutex rescaled_chunk_mutex_;

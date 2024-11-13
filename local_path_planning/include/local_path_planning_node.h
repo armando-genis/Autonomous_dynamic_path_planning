@@ -57,16 +57,21 @@ private:
     double track_car = 1;
     double start_offset = 0.5; // 0.5 meters offset in front of the car
     bool collision_detected = false;
+    int segment_start_index = 0;
+    int segment_start_index_temp = 0;
+    int closest_waypoint = 0;
 
     std::shared_ptr<std::vector<bool>> collision_vector;
     std::shared_ptr<geometry_msgs::msg::Polygon> vehicle_path;
     std::shared_ptr<geometry_msgs::msg::Polygon> segment_path;
     std::shared_ptr<vector<Eigen::VectorXd>> waypoints;              // [x, y, yaw]
     std::shared_ptr<vector<Eigen::VectorXd>> waypoints_segmentation; // [x, y, yaw]
+    std::shared_ptr<vector<Eigen::VectorXd>> waypoints_historical;   // [x, y, yaw]
     std::shared_ptr<State> car_state_;
     std::shared_ptr<traffic_information_msgs::msg::RoadElementsCollection> road_elements_;
 
-    std::vector<int> skip_ids = {363, 391, 572, 638, 631};
+    std::vector<int> skip_ids = {363, 391};
+    // std::vector<int> skip_ids = {363, 391};
 
     // tf2 buffer & listener
     tf2_ros::Buffer tf2_buffer;
@@ -74,6 +79,9 @@ private:
 
     // function to get the state (position) of the car
     void getCurrentRobotState();
+    // function to get the closest waypoint to the car
+    double getDistanceFromOdom(Eigen::VectorXd wapointPoint);
+    void compute_closest_waypoint();
 
     // Callback function
     void obstacle_info_callback(const obstacles_information_msgs::msg::ObstacleCollection::SharedPtr msg);
@@ -84,6 +92,9 @@ private:
     // functions to calculate the trajectory of the car
     vector<pair<double, double>> calculate_trajectory(double steering_angle, double wheelbase, int num_points);
     void extract_segment(const std::vector<std::pair<double, double>> &path, std::vector<double> &segment_x, std::vector<double> &segment_y, double length);
+
+    // function to check if the crosswalk is visited
+    void crosswalk_visited_check(const traffic_information_msgs::msg::RoadElements &crosswalk);
 
     // Subscribers for the obstacle information
     rclcpp::Subscription<obstacles_information_msgs::msg::ObstacleCollection>::SharedPtr obstacle_info_subscription_;
