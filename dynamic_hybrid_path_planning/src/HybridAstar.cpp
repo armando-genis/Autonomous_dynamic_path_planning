@@ -18,7 +18,7 @@ void HybridAstar::motionCommands()
     {
         // fist data: steering angle, second data: direction
         motionCommand.push_back({i, static_cast<double>(direction)});
-        motionCommand.push_back({i, -static_cast<double>(direction)});
+        // motionCommand.push_back({i, -static_cast<double>(direction)});
     }
 }
 
@@ -173,7 +173,7 @@ std::shared_ptr<planner::Node> HybridAstar::reeds_shepp_Path_iterative(const std
         bool has_collision = false;
         for (const auto &state : traj)
         {
-            geometry_msgs::msg::Polygon next_state_vehicle_poly = car_data_.getVehicleGeometry_state(state);
+            // geometry_msgs::msg::Polygon next_state_vehicle_poly = car_data_.getVehicleGeometry_state(state);
 
             // Check for boundary and collision in the grid map
             // if (grid_map_.checkCollision(state, next_state_vehicle_poly) || !grid_map_.isPointInBounds(state.gridx, state.gridy))
@@ -312,6 +312,86 @@ double HybridAstar::reeds_Path_Cost(const std::shared_ptr<planner::Node> &curren
     return cost;
 }
 
+// ===================== The dubins path calculation =============================
+std::shared_ptr<planner::Node> HybridAstar::dubins_Path(const std::shared_ptr<planner::Node> &current_Node, const std::shared_ptr<planner::Node> &goal_Node)
+{
+    double currentX = current_Node->Current_state.x;
+    double currentY = current_Node->Current_state.y;
+    double currentHeading = current_Node->Current_state.heading;
+
+    double goalX = goal_Node->Current_state.x;
+    double goalY = goal_Node->Current_state.y;
+    double goalHeading = goal_Node->Current_state.heading;
+
+    double radius = tan(car_data_.maxSteerAngle) / car_data_.wheelBase;
+
+    Path dubinsPathObj = Dubins_path.calc_dubins_path(currentX, currentY, currentHeading, goalX, goalY, goalHeading, radius);
+
+    // error check
+    if (dubinsPathObj.x.empty())
+    {
+        return nullptr;
+    }
+
+    vector<State> traj;
+    for (size_t i = 0; i < dubinsPathObj.x.size(); i++)
+    {
+        State state;
+        state.x = dubinsPathObj.x[i];
+        state.y = dubinsPathObj.y[i];
+        state.heading = dubinsPathObj.yaw[i];
+        // to grid cell ints the next state
+        auto next_cell = grid_map_.toCellID(state);
+        state.gridx = get<0>(next_cell);
+        state.gridy = get<1>(next_cell);
+        traj.push_back(state);
+    }
+
+    // check for collision
+    bool has_collision = false;
+    for (const auto &state : traj)
+    {
+        // geometry_msgs::msg::Polygon next_state_vehicle_poly = car_data_.getVehicleGeometry_state(state);
+
+        // if (grid_map_.checkCollision(state, next_state_vehicle_poly) || !grid_map_.isPointInBounds(state.gridx, state.gridy))
+        if (grid_map_.isSingleStateCollisionFree(state))
+        {
+            // If any point in the trajectory collides, mark the collision and break out of the loop
+            has_collision = true;
+            break; // Stop checking this trajectory
+        }
+    }
+
+    if (!has_collision)
+    {
+        // cost calculation for the node
+        double cost = dubins_Path_Cost(current_Node, &dubinsPathObj);
+        // cout << "--->dubins path cost: " << cost << endl;
+        return std::make_shared<planner::Node>(traj.back(), traj, cost, 0, 1, current_Node);
+    }
+
+    return nullptr;
+}
+
+double HybridAstar::dubins_Path_Cost(const std::shared_ptr<planner::Node> &currentNode, const Path *path)
+{
+    double cost = currentNode->Cost_path;
+
+    // Distance cost: Add cost based on the length of each segment
+    cost += std::fabs(path->length);
+
+    // Steering Angle Cost (Dubins paths only allow for constant curvature segments)
+    for (const auto &mode : path->mode)
+    {
+        if (mode != "S") // Steering costs are added for non-straight segments
+        {
+            cost += car_data_.maxSteerAngle * steerAngle;
+        }
+    }
+
+    return cost;
+}
+
 // ===============holonomic path planning =============================
 vector<vector<int>> HybridAstar::holonomicMotionCommands()
 {
@@ -421,7 +501,6 @@ std::vector<double> HybridAstar::holonomicCostsWithObstacles_planning(const std:
             double movement_cost = eucledianCost(command, current_x, current_y);
             double newCost = current_cost + movement_cost;
 
-
             // If the new cost is lower, update the cost map and push into the open set
             if (newCost < cost_map_[neighbor_index])
             {
@@ -484,7 +563,6 @@ vector<State> HybridAstar::run(State start_state, State goal_state)
     openSet[start_state_] = startNode;
     costQueue.push({startNode->Cost_path + hybridCost * goal_map_[start_index], startNode});
 
-
     // Step 6.5: Initialize a counter for the number of iterations
     int iterations = 0;
 
@@ -515,13 +593,24 @@ vector<State> HybridAstar::run(State start_state, State goal_state)
         openSet.erase(currentState);
         closedSet[currentState] = currentNode;
 
-        // Try to find a Reeds-Shepp path to the goal from the current node
-        auto dNode = reeds_shepp_Path(currentNode, goalNode);
+        // // Try to find a Reeds-Shepp path to the goal from the current node
+        // auto dNode = reeds_shepp_Path(currentNode, goalNode);
 
-        // If a valid Reeds-Shepp path is found, exit the loop
+        // // If a valid Reeds-Shepp path is found, exit the loop
+        // if (dNode)
+        // {
+        //     cout << green << "Reeds-Shepp path found" << reset << endl;
+        //     closedSet[dNode->Current_state] = dNode;
+        //     goalNode = dNode;
+        //     break;
+        // }
+
+        // Try to find a Dubins path to the goal from the current node
+        auto dNode = dubins_Path(currentNode, goalNode);
+
         if (dNode)
         {
-            cout << green << "Reeds-Shepp path found" << reset << endl;
+            cout << green << "Dubins path found" << reset << endl;
             closedSet[dNode->Current_state] = dNode;
             goalNode = dNode;
             break;
@@ -545,7 +634,6 @@ vector<State> HybridAstar::run(State start_state, State goal_state)
 
         // Get neighboring nodes by simulating motion
         auto neighbors = GetnextNeighbours(currentNode);
-
 
         for (auto &neighbor : neighbors)
         {

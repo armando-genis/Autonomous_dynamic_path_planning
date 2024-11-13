@@ -10,6 +10,7 @@
 #include "CarData.h"
 #include "Node.h"
 #include "reeds_shepp_path.h"
+#include "dubins_path.h"
 
 #include <tuple>
 #include <vector>
@@ -57,6 +58,11 @@ public:
     std::shared_ptr<planner::Node> reeds_shepp_Path_priority_queue(const std::shared_ptr<planner::Node> &current_Node, std::vector<PATH> reedsSheppPaths);
     std::shared_ptr<planner::Node> reeds_shepp_Path_iterative(const std::shared_ptr<planner::Node> &current_Node, std::vector<PATH> reedsSheppPaths);
     double reeds_Path_Cost(const std::shared_ptr<planner::Node> &currentNode, const PATH *path);
+
+    // dubins path planning
+    std::shared_ptr<planner::Node> dubins_Path(const std::shared_ptr<planner::Node> &current_Node, const std::shared_ptr<planner::Node> &goal_Node);
+    double dubins_Path_Cost(const std::shared_ptr<planner::Node> &currentNode, const Path *path);
+
     // holonomic path planning
     vector<vector<int>> holonomicMotionCommands();
     std::vector<double> holonomicCostsWithObstacles_planning(const std::shared_ptr<planner::Node> &GoalNode);
@@ -68,6 +74,7 @@ private:
     CarData car_data_;
 
     reeds_shepp_path Reeds_Shepp_Path_;
+    dubins_path Dubins_path;
 
     State start_state_;
     State goal_state_;
