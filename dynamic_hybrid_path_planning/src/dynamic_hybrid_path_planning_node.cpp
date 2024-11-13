@@ -29,7 +29,7 @@ dynamic_hybrid_path_planning_node::dynamic_hybrid_path_planning_node(/* args */)
 
     occupancy_grid_pub_test_ = this->create_publisher<nav_msgs::msg::OccupancyGrid>("/occupancy_grid_obstacles", 10);
 
-    timer_ = this->create_wall_timer(std::chrono::milliseconds(100), std::bind(&dynamic_hybrid_path_planning_node::timer_callback, this));
+    timer_ = this->create_wall_timer(std::chrono::milliseconds(50), std::bind(&dynamic_hybrid_path_planning_node::timer_callback, this));
 
     target_waypoint_subscriber_ = this->create_subscription<visualization_msgs::msg::Marker>("target_waypoint_marker", 10,
                                                                                              std::bind(&dynamic_hybrid_path_planning_node::markerCallback, this, std::placeholders::_1));
@@ -81,51 +81,15 @@ void dynamic_hybrid_path_planning_node::getCurrentRobotState()
 
 void dynamic_hybrid_path_planning_node::timer_callback()
 {
-    getCurrentRobotState();
-    mapCombination();
-    start_goal_points_.push_back(car_state_);
-    start_goal_points_.push_back(waypoint_target_);
-    Star_End_point_visualization();
+
     hybridAstarPathPlanning();
 }
 
 void dynamic_hybrid_path_planning_node::mapCombination()
 {
-    // Retrieve the latest obstacle data
-    obstacles_information_msgs::msg::ObstacleCollection::SharedPtr obstacles;
-    {
-        std::lock_guard<std::mutex> lock(obstacle_mutex_);
-        if (latest_obstacles_)
-        {
-            obstacles = latest_obstacles_;
-        }
-        else
-        {
-            // No obstacle data available
-            std::cout << red << "No obstacle data available" << reset << std::endl;
-            return;
-        }
-    }
 
-    // Retrieve the latest global grid map data
-    nav_msgs::msg::OccupancyGrid::SharedPtr global_map;
-    {
-        std::lock_guard<std::mutex> lock(map_mutex_);
-        if (global_map_)
-        {
-            global_map = global_map_;
-        }
-        else
-        {
-            // No global grid map data available
-            std::cout << red << "No global grid map data available" << reset << std::endl;
-            return;
-        }
-    }
-
-    // mutex for rescaled_chunk_
-    std::lock_guard<std::mutex> lock(rescaled_chunk_mutex_);
-
+    // Lock rescaled_chunk_ mutex to prevent concurrent access
+    std::lock_guard<std::mutex> rescaled_lock(rescaled_chunk_mutex_);
     if (!rescaled_chunk_)
     {
         rescaled_chunk_ = std::make_shared<nav_msgs::msg::OccupancyGrid>();
@@ -136,15 +100,15 @@ void dynamic_hybrid_path_planning_node::mapCombination()
 
     int chunk_size = 20; // 20 x 20 meters
     int chunk_radius = chunk_size / 2;
-    double forward_offset = 10.0; // Offset to displace the map forward
+    double forward_offset = 5.0; // Offset to displace the map forward
 
     // Convert car state to grid coordinates
-    int car_x_grid = (car_state_.x - global_map->info.origin.position.x) / global_map->info.resolution;
-    int car_y_grid = (car_state_.y - global_map->info.origin.position.y) / global_map->info.resolution;
+    int car_x_grid = (car_state_.x - global_map_->info.origin.position.x) / global_map_->info.resolution;
+    int car_y_grid = (car_state_.y - global_map_->info.origin.position.y) / global_map_->info.resolution;
 
     // Calculate forward offset in grid coordinates based on the car's heading
-    int forward_x_offset = static_cast<int>((forward_offset * cos(car_state_.heading)) / global_map->info.resolution);
-    int forward_y_offset = static_cast<int>((forward_offset * sin(car_state_.heading)) / global_map->info.resolution);
+    int forward_x_offset = static_cast<int>((forward_offset * cos(car_state_.heading)) / global_map_->info.resolution);
+    int forward_y_offset = static_cast<int>((forward_offset * sin(car_state_.heading)) / global_map_->info.resolution);
 
     // Shift the chunk's center forward by the offset
     int new_center_x = car_x_grid + forward_x_offset;
@@ -152,18 +116,18 @@ void dynamic_hybrid_path_planning_node::mapCombination()
 
     // Define chunk boundaries based on the new center
     int min_x = std::max(0, new_center_x - chunk_radius);
-    int max_x = std::min(static_cast<int>(global_map->info.width), new_center_x + chunk_radius);
+    int max_x = std::min(static_cast<int>(global_map_->info.width), new_center_x + chunk_radius);
     int min_y = std::max(0, new_center_y - chunk_radius);
-    int max_y = std::min(static_cast<int>(global_map->info.height), new_center_y + chunk_radius);
+    int max_y = std::min(static_cast<int>(global_map_->info.height), new_center_y + chunk_radius);
 
     // Initialize the chunk grid
     nav_msgs::msg::OccupancyGrid chunk;
-    chunk.header = global_map->header;
-    chunk.info.resolution = global_map->info.resolution;
+    chunk.header = global_map_->header;
+    chunk.info.resolution = global_map_->info.resolution;
     chunk.info.width = max_x - min_x;
     chunk.info.height = max_y - min_y;
-    chunk.info.origin.position.x = global_map->info.origin.position.x + min_x * global_map->info.resolution;
-    chunk.info.origin.position.y = global_map->info.origin.position.y + min_y * global_map->info.resolution;
+    chunk.info.origin.position.x = global_map_->info.origin.position.x + min_x * global_map_->info.resolution;
+    chunk.info.origin.position.y = global_map_->info.origin.position.y + min_y * global_map_->info.resolution;
     // chunk.info.origin.position.z = car_state_.z;
     chunk.info.origin.orientation.w = 1.0;
 
@@ -173,21 +137,21 @@ void dynamic_hybrid_path_planning_node::mapCombination()
     {
         for (int x = min_x; x < max_x; ++x)
         {
-            int global_index = y * global_map->info.width + x;
+            int global_index = y * global_map_->info.width + x;
             int local_x = x - min_x;
             int local_y = y - min_y;
             int chunk_index = local_y * chunk.info.width + local_x;
 
-            chunk.data[chunk_index] = global_map->data[global_index];
+            chunk.data[chunk_index] = global_map_->data[global_index];
         }
     }
 
-    double scale_factor = 3.33;
+    double scale_factor = 5;
     cv::Mat chunk_mat = toMat(chunk);
     cv::Mat rescaled_chunk_mat = rescaleChunk(chunk_mat, scale_factor);
 
-    rescaled_chunk_->header = global_map->header;
-    rescaled_chunk_->info.resolution = 0.3;
+    rescaled_chunk_->header = global_map_->header;
+    rescaled_chunk_->info.resolution = 0.2;
     rescaled_chunk_->info.width = rescaled_chunk_mat.cols;
     rescaled_chunk_->info.height = rescaled_chunk_mat.rows;
     rescaled_chunk_->info.origin.position.x = chunk.info.origin.position.x;
@@ -263,9 +227,9 @@ void dynamic_hybrid_path_planning_node::mapCombination()
     double cos_heading = cos(car_state_.heading);
     double sin_heading = sin(car_state_.heading);
 
-    for (size_t i = 0; i < obstacles->obstacles.size(); ++i)
+    for (size_t i = 0; i < latest_obstacles_->obstacles.size(); ++i)
     {
-        const auto &obstacle = obstacles->obstacles[i];
+        const auto &obstacle = latest_obstacles_->obstacles[i];
         for (size_t j = 0; j < obstacle.polygon.points.size(); ++j)
         {
             auto &current_point_lidar = obstacle.polygon.points[j];
@@ -328,7 +292,7 @@ void dynamic_hybrid_path_planning_node::hybridAstarPathPlanning()
     HybridAstar hybrid_astar(*grid_map_, car_data_, pathLength, step_car);
     auto goal_trajectory = hybrid_astar.run(car_state_, waypoint_target_);
 
-    visualization_msgs::msg::MarkerArray marker_array_next;
+    visualization_msgs::msg::MarkerArray arrow_marker_array;
     int id = 4000; // Unique ID for each marker
     size_t total_states = goal_trajectory.size();
 
@@ -336,66 +300,50 @@ void dynamic_hybrid_path_planning_node::hybridAstarPathPlanning()
     {
         const auto &state = goal_trajectory[i];
 
-        // Create the CUBE marker for the car polygon
-        visualization_msgs::msg::Marker car_polygon_marker;
-        car_polygon_marker.header.frame_id = "map";
-        car_polygon_marker.header.stamp = this->now();
-        car_polygon_marker.ns = "next_state_polygons";
-        car_polygon_marker.action = visualization_msgs::msg::Marker::ADD;
-        car_polygon_marker.id = id++;
-        car_polygon_marker.type = visualization_msgs::msg::Marker::CUBE;
-
-        // Set the size of the CUBE
-        car_polygon_marker.scale.x = car_data_.axleToFront + car_data_.axleToBack; // Length of the car
-        car_polygon_marker.scale.y = car_data_.width;                              // Width of the car
-        car_polygon_marker.scale.z = 0.1;                                          // Height of the CUBE
-
-        // Calculate interpolation factor (0.0 to 1.0) for color transition
-        double t = (total_states > 1) ? static_cast<double>(i) / (total_states - 1) : 1.0;
-
-        // Initialize RGB values for Yellow -> Green -> Blue transition
-        double r = 0.0, g = 1.0, b = 0.0;
-        if (t < 0.5)
-        {
-            // Yellow to Green transition (first half)
-            double yellow_to_green_factor = t / 0.5;
-            r = 1.0 - yellow_to_green_factor;
-            g = 1.0;
-            b = 0.0;
-        }
-        else
-        {
-            // Green to Blue transition (second half)
-            double green_to_blue_factor = (t - 0.5) / 0.5;
-            r = 0.0;
-            g = 1.0 - green_to_blue_factor;
-            b = green_to_blue_factor;
-        }
-
-        car_polygon_marker.color.r = r;
-        car_polygon_marker.color.g = g;
-        car_polygon_marker.color.b = b;
-        car_polygon_marker.color.a = 0.5;
-        car_polygon_marker.pose.position.x = state.x;
-        car_polygon_marker.pose.position.y = state.y;
-        car_polygon_marker.pose.position.z = 0.025;
-
         // Convert heading (yaw) to quaternion for marker orientation
         tf2::Quaternion quat;
         quat.setRPY(0, 0, state.heading);
-        car_polygon_marker.pose.orientation.x = quat.x();
-        car_polygon_marker.pose.orientation.y = quat.y();
-        car_polygon_marker.pose.orientation.z = quat.z();
-        car_polygon_marker.pose.orientation.w = quat.w();
 
-        marker_array_next.markers.push_back(car_polygon_marker);
+        // Create arrow marker to represent the heading
+        visualization_msgs::msg::Marker arrow_marker;
+        arrow_marker.header.frame_id = "map";
+        arrow_marker.header.stamp = this->now();
+        arrow_marker.ns = "state_heading_arrows";
+        arrow_marker.action = visualization_msgs::msg::Marker::ADD;
+        arrow_marker.id = id++;
+        arrow_marker.type = visualization_msgs::msg::Marker::ARROW;
+
+        // Set arrow size (you can adjust these values as needed)
+        arrow_marker.scale.x = 0.8;  // Arrow length
+        arrow_marker.scale.y = 0.15; // Arrow width
+        arrow_marker.scale.z = 0.15; // Arrow height
+
+        // Set arrow color (you can use a different color for arrows)
+        arrow_marker.color.r = 1.0;
+        arrow_marker.color.g = 1.0;
+        arrow_marker.color.b = 1.0;
+        arrow_marker.color.a = 0.6;
+
+        // Position the arrow at the same (x, y) as the state, with a slightly higher z-value
+        arrow_marker.pose.position.x = state.x;
+        arrow_marker.pose.position.y = state.y;
+        arrow_marker.pose.position.z = 0.1; // Slightly above the ground
+
+        // Set the orientation of the arrow based on the heading
+        arrow_marker.pose.orientation.x = quat.x();
+        arrow_marker.pose.orientation.y = quat.y();
+        arrow_marker.pose.orientation.z = quat.z();
+        arrow_marker.pose.orientation.w = quat.w();
+
+        arrow_marker_array.markers.push_back(arrow_marker);
     }
-    // Publish the MarkerArray containing the CUBEs
-    hybrid_astar_path_pub_->publish(marker_array_next);
+
+    // Publish the MarkerArray containing the arrows
+    arrow_pub_->publish(arrow_marker_array);
 
     // Memory clean up
     goal_trajectory.clear();
-    marker_array_next.markers.clear();
+    arrow_marker_array.markers.clear();
 }
 
 void dynamic_hybrid_path_planning_node::Star_End_point_visualization()
@@ -446,13 +394,20 @@ void dynamic_hybrid_path_planning_node::Star_End_point_visualization()
 // ============================== Callbacks ==============================
 void dynamic_hybrid_path_planning_node::obstacle_info_callback(const obstacles_information_msgs::msg::ObstacleCollection::SharedPtr msg)
 {
-    std::lock_guard<std::mutex> lock(obstacle_mutex_);
     latest_obstacles_ = msg;
+    if (global_map_)
+    {
+        getCurrentRobotState();
+        mapCombination();
+    }
+    else
+    {
+        std::cout << red << "Global map data is not yet available" << reset << std::endl;
+    }
 }
 
 void dynamic_hybrid_path_planning_node::global_gridMapdata(const nav_msgs::msg::OccupancyGrid::SharedPtr map)
 {
-    std::lock_guard<std::mutex> lock(map_mutex_);
     global_map_ = map;
 }
 

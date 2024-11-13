@@ -93,13 +93,13 @@ private:
     void hybridAstarPathPlanning();
     void Star_End_point_visualization();
 
-    // obstacle information mutex
+    // obstacle information data
     std::shared_ptr<obstacles_information_msgs::msg::ObstacleCollection> latest_obstacles_;
-    std::mutex obstacle_mutex_;
 
-    // map data mutex
+    // map data
     std::shared_ptr<nav_msgs::msg::OccupancyGrid> global_map_;
-    std::mutex map_mutex_;
+
+    nav_mgs::msg::OccupancyGrid path_;
 
     // rescaled_chunk; mutex
     std::shared_ptr<nav_msgs::msg::OccupancyGrid> rescaled_chunk_;
