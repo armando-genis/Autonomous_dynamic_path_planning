@@ -6,12 +6,21 @@
 #include <visualization_msgs/msg/marker.hpp>
 #include <geometry_msgs/msg/point.hpp>
 #include <std_msgs/msg/float64.hpp>
+#include <nav_msgs/msg/occupancy_grid.hpp>
 
 // tf
 #include <tf2_geometry_msgs/tf2_geometry_msgs.hpp>
 #include <tf2/LinearMath/Quaternion.h>
 #include <tf2_ros/buffer.h>
 #include <tf2_ros/transform_listener.h>
+
+// Eigen (must be included before OpenCV!!)
+#include <Eigen/Dense>
+
+// OpenCV
+#include <opencv2/opencv.hpp>
+#include <opencv2/imgproc.hpp>
+#include <opencv2/core/eigen.hpp>
 
 // Custom msgs obstacles_information_msgs for Obstacle and ObstacleCollection
 #include "obstacles_information_msgs/msg/obstacle.hpp"
@@ -34,9 +43,6 @@
 #include <cmath>
 #include <utility>
 
-// Eigen
-#include <Eigen/Dense>
-
 using namespace std;
 
 class local_path_planning_node : public rclcpp::Node
@@ -56,7 +62,8 @@ private:
     double num_points = 15;
     double track_car = 1;
     double start_offset = 0.5; // 0.5 meters offset in front of the car
-    bool collision_detected = false;
+    bool collision_detected_trajectory = false;
+    bool collision_detected_path = false;
     int segment_start_index = 0;
     int segment_start_index_temp = 0;
     int closest_waypoint = 0;
@@ -68,10 +75,9 @@ private:
     std::shared_ptr<vector<Eigen::VectorXd>> waypoints_segmentation; // [x, y, yaw]
     std::shared_ptr<vector<Eigen::VectorXd>> waypoints_historical;   // [x, y, yaw]
     std::shared_ptr<State> car_state_;
-    std::shared_ptr<traffic_information_msgs::msg::RoadElementsCollection> road_elements_;
-
-    std::vector<int> skip_ids = {363, 391};
-    // std::vector<int> skip_ids = {363, 391};
+    std::shared_ptr<nav_msgs::msg::OccupancyGrid> global_map_;
+    std::shared_ptr<nav_msgs::msg::OccupancyGrid> rescaled_chunk_;
+    std::vector<int> skip_ids = {}; // {363, 391};
 
     // tf2 buffer & listener
     tf2_ros::Buffer tf2_buffer;
@@ -83,11 +89,15 @@ private:
     double getDistanceFromOdom(Eigen::VectorXd wapointPoint);
     void compute_closest_waypoint();
 
+    // function to compute the polygon of the path
+    void compute_path_polygon();
+
     // Callback function
     void obstacle_info_callback(const obstacles_information_msgs::msg::ObstacleCollection::SharedPtr msg);
     void yawCarCallback(const std_msgs::msg::Float64::SharedPtr msg);
     void waypoints_callback(const visualization_msgs::msg::MarkerArray::SharedPtr msg);
     void roadElementsCallback(const traffic_information_msgs::msg::RoadElementsCollection::SharedPtr msg);
+    void globalMap_callback(const nav_msgs::msg::OccupancyGrid::SharedPtr map);
 
     // functions to calculate the trajectory of the car
     vector<pair<double, double>> calculate_trajectory(double steering_angle, double wheelbase, int num_points);
@@ -95,6 +105,11 @@ private:
 
     // function to check if the crosswalk is visited
     void crosswalk_visited_check(const traffic_information_msgs::msg::RoadElements &crosswalk);
+
+    // functions to combine and rescale the map
+    void map_combination(const obstacles_information_msgs::msg::ObstacleCollection::SharedPtr msg);
+    cv::Mat toMat(const nav_msgs::msg::OccupancyGrid &map);
+    cv::Mat rescaleChunk(const cv::Mat &chunk_mat, double scale_factor);
 
     // Subscribers for the obstacle information
     rclcpp::Subscription<obstacles_information_msgs::msg::ObstacleCollection>::SharedPtr obstacle_info_subscription_;
@@ -107,6 +122,10 @@ private:
     rclcpp::Subscription<traffic_information_msgs::msg::RoadElementsCollection>::SharedPtr road_elements_subscription_;
     // publisher for the crosswalk markers
     rclcpp::Publisher<visualization_msgs::msg::MarkerArray>::SharedPtr crosswalk_marker_publisher_;
+    // subcriber for the map complete of the hd map (maybe make this in anoter pkg more futher)
+    rclcpp::Subscription<nav_msgs::msg::OccupancyGrid>::SharedPtr global_grid_map_sub_;
+    // publisher for the occupancy grid
+    rclcpp::Publisher<nav_msgs::msg::OccupancyGrid>::SharedPtr occupancy_grid_pub_test_;
 
 public:
     local_path_planning_node(/* args */);

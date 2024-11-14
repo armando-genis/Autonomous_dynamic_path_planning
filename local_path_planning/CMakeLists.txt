@@ -19,6 +19,8 @@ find_package(nav_msgs REQUIRED)
 find_package(obstacles_information_msgs REQUIRED)
 find_package(traffic_information_msgs REQUIRED)
 
+find_package(OpenCV REQUIRED)
+
 
 
 # External dependencies
@@ -42,6 +44,7 @@ ament_target_dependencies(local_path_planning_node
   tf2_geometry_msgs
   tf2_ros
   traffic_information_msgs
+  OpenCV
 )
 
 target_include_directories(local_path_planning_node PUBLIC

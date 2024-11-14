@@ -12,51 +12,36 @@ local_path_planning_node::local_path_planning_node(/* args */) : Node("local_pat
     yaw_car_sub_ = this->create_subscription<std_msgs::msg::Float64>(
         "/yaw_car", 10, std::bind(&local_path_planning_node::yawCarCallback, this, std::placeholders::_1));
 
-    lane_steering_publisher_ = this->create_publisher<visualization_msgs::msg::Marker>(
-        "steering_lane", 10);
-
     waypoints_subscription_ = this->create_subscription<visualization_msgs::msg::MarkerArray>(
         "/waypoints_routing", 10, std::bind(&local_path_planning_node::waypoints_callback, this, std::placeholders::_1));
 
-    crosswalk_marker_publisher_ = this->create_publisher<visualization_msgs::msg::MarkerArray>("crosswalk_markers", 10);
+    global_grid_map_sub_ = this->create_subscription<nav_msgs::msg::OccupancyGrid>(
+        "/occupancy_grid_complete_map", 10, std::bind(&local_path_planning_node::globalMap_callback, this, std::placeholders::_1));
+
+    lane_steering_publisher_ = this->create_publisher<visualization_msgs::msg::Marker>(
+        "steering_lane", 10);
+
+    crosswalk_marker_publisher_ = this->create_publisher<visualization_msgs::msg::MarkerArray>(
+        "crosswalk_markers", 10);
+
+    occupancy_grid_pub_test_ = this->create_publisher<nav_msgs::msg::OccupancyGrid>(
+        "/occupancy_grid_obstacles", 10);
 
     vehicle_path = std::make_shared<geometry_msgs::msg::Polygon>();
+    segment_path = std::make_shared<geometry_msgs::msg::Polygon>();
     collision_vector = std::make_shared<std::vector<bool>>();
     waypoints = std::make_shared<vector<Eigen::VectorXd>>();
     car_state_ = std::make_shared<State>();
-    road_elements_ = std::make_shared<traffic_information_msgs::msg::RoadElementsCollection>();
     waypoints_segmentation = std::make_shared<vector<Eigen::VectorXd>>();
     waypoints_historical = std::make_shared<vector<Eigen::VectorXd>>();
+    global_map_ = std::make_shared<nav_msgs::msg::OccupancyGrid>();
+    rescaled_chunk_ = std::make_shared<nav_msgs::msg::OccupancyGrid>();
 
     RCLCPP_INFO(this->get_logger(), "\033[1;32m----> local_path_planning_node initialized.\033[0m");
 }
 
 local_path_planning_node::~local_path_planning_node()
 {
-}
-
-void local_path_planning_node::crosswalk_visited_check(const traffic_information_msgs::msg::RoadElements &crosswalk)
-{
-    double center_x = 0.0;
-    double center_y = 0.0;
-    int num_points = crosswalk.points.size();
-
-    for (const auto &point : crosswalk.points)
-    {
-        center_x += point.x;
-        center_y += point.y;
-    }
-    center_x /= num_points;
-    center_y /= num_points;
-
-    // Check for collision only if the crosswalk is near the the car (e.g., within 3 meters)
-    // if (std::abs(crosswalk.points[0].x - car_state_->x) < 5 && std::abs(crosswalk.points[0].y - car_state_->y) < 5)
-    if (std::abs(center_x - car_state_->x) < 5 && std::abs(center_y - car_state_->y) < 5)
-    {
-        // append the element id to the list of visited crosswalks
-        skip_ids.push_back(crosswalk.id);
-        segment_start_index_temp = segment_start_index;
-    }
 }
 
 void local_path_planning_node::getCurrentRobotState()
@@ -80,6 +65,30 @@ void local_path_planning_node::getCurrentRobotState()
     catch (tf2::TransformException &ex)
     {
         std::cout << red << "Transform error: " << ex.what() << reset << std::endl;
+    }
+}
+
+void local_path_planning_node::crosswalk_visited_check(const traffic_information_msgs::msg::RoadElements &crosswalk)
+{
+    double center_x = 0.0;
+    double center_y = 0.0;
+    int num_points = crosswalk.points.size();
+
+    for (const auto &point : crosswalk.points)
+    {
+        center_x += point.x;
+        center_y += point.y;
+    }
+    center_x /= num_points;
+    center_y /= num_points;
+
+    // Check for collision only if the crosswalk is near the the car (e.g., within 3 meters)
+    // if (std::abs(crosswalk.points[0].x - car_state_->x) < 5 && std::abs(crosswalk.points[0].y - car_state_->y) < 5)
+    if (std::abs(center_x - car_state_->x) < 5 && std::abs(center_y - car_state_->y) < 5)
+    {
+        // append the element id to the list of visited crosswalks
+        skip_ids.push_back(crosswalk.id);
+        segment_start_index_temp = segment_start_index;
     }
 }
 
@@ -111,6 +120,48 @@ void local_path_planning_node::compute_closest_waypoint()
             smallest_curr_distance = curr_distance;
         }
     }
+}
+
+void local_path_planning_node::compute_path_polygon()
+{
+
+    if (waypoints_segmentation->empty())
+    {
+        std::cout << red << "Warning: waypoints segmentation is not available. Skipping polygon path creation." << reset << std::endl;
+        return;
+    }
+
+    segment_path->points.clear();
+
+    // Publish lane with the track of the path for the left side
+    for (size_t i = 0; i < waypoints_segmentation->size(); ++i)
+    {
+        double angle = waypoints_segmentation->at(i)(3);
+        double offset_x = track_car * cos(angle + M_PI / 2);
+        double offset_y = track_car * sin(angle + M_PI / 2);
+
+        geometry_msgs::msg::Point32 converted_point;
+        converted_point.x = waypoints_segmentation->at(i)(0) + offset_x;
+        converted_point.y = waypoints_segmentation->at(i)(1) + offset_y;
+        converted_point.z = 0.0;
+        segment_path->points.push_back(converted_point);
+    }
+
+    //  invertion of the right side to math with the left side
+    for (size_t i = waypoints_segmentation->size(); i-- > 0;)
+    {
+        double angle = waypoints_segmentation->at(i)(3);
+        double offset_x = track_car * cos(angle + M_PI / 2);
+        double offset_y = track_car * sin(angle + M_PI / 2);
+
+        geometry_msgs::msg::Point32 converted_point;
+        converted_point.x = waypoints_segmentation->at(i)(0) - offset_x;
+        converted_point.y = waypoints_segmentation->at(i)(1) - offset_y;
+        converted_point.z = 0.0;
+        segment_path->points.push_back(converted_point);
+    }
+
+    segment_path->points.push_back(segment_path->points.front());
 }
 
 double local_path_planning_node::getDistanceFromOdom(Eigen::VectorXd wapointPoint)
@@ -151,6 +202,186 @@ void local_path_planning_node::waypoints_callback(const visualization_msgs::msg:
     }
 }
 
+void local_path_planning_node::map_combination(const obstacles_information_msgs::msg::ObstacleCollection::SharedPtr msg)
+{
+    if (!global_map_)
+    {
+        std::cout << red << "Warning: global_map is not available. Skipping map combination." << reset << std::endl;
+        return;
+    }
+    // clean the rescaled_chunk_
+    rescaled_chunk_->data.clear();
+
+    int chunk_size = 20; // 20 x 20 meters
+    int chunk_radius = chunk_size / 2;
+
+    // Convert car state to grid coordinates
+    int car_x_grid = static_cast<int>((car_state_->x - global_map_->info.origin.position.x) / global_map_->info.resolution);
+    int car_y_grid = static_cast<int>((car_state_->y - global_map_->info.origin.position.y) / global_map_->info.resolution);
+
+    // Define chunk boundaries
+    int min_x = std::max(0, car_x_grid - chunk_radius);
+    int max_x = std::min(static_cast<int>(global_map_->info.width), car_x_grid + chunk_radius);
+    int min_y = std::max(0, car_y_grid - chunk_radius);
+    int max_y = std::min(static_cast<int>(global_map_->info.height), car_y_grid + chunk_radius);
+
+    // Initialize the chunk grid
+    nav_msgs::msg::OccupancyGrid chunk;
+    chunk.header = global_map_->header;
+    chunk.info.resolution = global_map_->info.resolution;
+    chunk.info.width = max_x - min_x;
+    chunk.info.height = max_y - min_y;
+    chunk.info.origin.position.x = global_map_->info.origin.position.x + min_x * global_map_->info.resolution;
+    chunk.info.origin.position.y = global_map_->info.origin.position.y + min_y * global_map_->info.resolution;
+    chunk.info.origin.position.z = car_state_->z;
+    chunk.info.origin.orientation.w = 1.0;
+
+    chunk.data.resize(chunk.info.width * chunk.info.height, 0);
+
+    for (int y = min_y; y < max_y; ++y)
+    {
+        for (int x = min_x; x < max_x; ++x)
+        {
+            int global_index = y * global_map_->info.width + x;
+            int local_x = x - min_x;
+            int local_y = y - min_y;
+            int chunk_index = local_y * chunk.info.width + local_x;
+
+            chunk.data[chunk_index] = global_map_->data[global_index];
+        }
+    }
+
+    double scale_factor = 5;
+    cv::Mat chunk_mat = toMat(chunk);
+    cv::Mat rescaled_chunk_mat = rescaleChunk(chunk_mat, scale_factor);
+
+    rescaled_chunk_->header = global_map_->header;
+    rescaled_chunk_->info.resolution = 0.2;
+    rescaled_chunk_->info.width = rescaled_chunk_mat.cols;
+    rescaled_chunk_->info.height = rescaled_chunk_mat.rows;
+    rescaled_chunk_->info.origin.position.x = chunk.info.origin.position.x;
+    rescaled_chunk_->info.origin.position.y = chunk.info.origin.position.y;
+    rescaled_chunk_->info.origin.position.z = car_state_->z;
+    rescaled_chunk_->info.origin.orientation.w = 1.0;
+
+    rescaled_chunk_->data.resize(rescaled_chunk_->info.width * rescaled_chunk_->info.height, 0);
+
+    for (int i = 0; i < rescaled_chunk_mat.rows * rescaled_chunk_mat.cols; i++)
+    {
+        if (rescaled_chunk_mat.data[i] == 254)
+            rescaled_chunk_->data[i] = 0;
+        else if (rescaled_chunk_mat.data[i] == 0)
+            rescaled_chunk_->data[i] = 100;
+        else
+            rescaled_chunk_->data[i] = -1;
+    }
+
+    auto mark_grid = [&](int x, int y, int value)
+    {
+        if (x >= 0 && x < static_cast<int>(rescaled_chunk_->info.width) && y >= 0 && y < static_cast<int>(rescaled_chunk_->info.height))
+        {
+            rescaled_chunk_->data[y * rescaled_chunk_->info.width + x] = value; // Mark the cell
+        }
+    };
+
+    auto inflate_point = [&](int x, int y, int radius, int value)
+    {
+        for (int dx = -radius; dx <= radius; ++dx)
+        {
+            for (int dy = -radius; dy <= radius; ++dy)
+            {
+                if (dx * dx + dy * dy <= radius * radius)
+                { // Circle equation
+                    mark_grid(x + dx, y + dy, value);
+                }
+            }
+        }
+    };
+
+    auto draw_inflated_line = [&](int x0, int y0, int x1, int y1, int radius, int value)
+    {
+        int dx = abs(x1 - x0), dy = abs(y1 - y0);
+        int n = 1 + dx + dy;
+        int x_inc = (x1 > x0) ? 1 : -1;
+        int y_inc = (y1 > y0) ? 1 : -1;
+        int error = dx - dy;
+        dx *= 2;
+        dy *= 2;
+
+        for (; n > 0; --n)
+        {
+            inflate_point(x0, y0, radius, value);
+
+            if (error > 0)
+            {
+                x0 += x_inc;
+                error -= dy;
+            }
+            else
+            {
+                y0 += y_inc;
+                error += dx;
+            }
+        }
+    };
+
+    int inflation_radius = 1; // Inflated cells around the obstacles
+    int value_to_mark = 100;
+
+    // Transformation from lidar frame to map frame
+    double cos_heading = cos(car_state_->heading);
+    double sin_heading = sin(car_state_->heading);
+
+    for (size_t i = 0; i < msg->obstacles.size(); ++i)
+    {
+        const auto &obstacle = msg->obstacles[i];
+        for (size_t j = 0; j < obstacle.polygon.points.size(); ++j)
+        {
+            auto &current_point_lidar = obstacle.polygon.points[j];
+            auto &next_point_lidar = obstacle.polygon.points[(j + 1) % obstacle.polygon.points.size()];
+
+            geometry_msgs::msg::Point current_point_map;
+            current_point_map.x = car_state_->x + cos_heading * current_point_lidar.x - sin_heading * current_point_lidar.y;
+            current_point_map.y = car_state_->y + sin_heading * current_point_lidar.x + cos_heading * current_point_lidar.y;
+            geometry_msgs::msg::Point next_point_map;
+            next_point_map.x = car_state_->x + cos_heading * next_point_lidar.x - sin_heading * next_point_lidar.y;
+            next_point_map.y = car_state_->y + sin_heading * next_point_lidar.x + cos_heading * next_point_lidar.y;
+
+            int x0 = static_cast<int>((current_point_map.x - rescaled_chunk_->info.origin.position.x) / rescaled_chunk_->info.resolution);
+            int y0 = static_cast<int>((current_point_map.y - rescaled_chunk_->info.origin.position.y) / rescaled_chunk_->info.resolution);
+            int x1 = static_cast<int>((next_point_map.x - rescaled_chunk_->info.origin.position.x) / rescaled_chunk_->info.resolution);
+            int y1 = static_cast<int>((next_point_map.y - rescaled_chunk_->info.origin.position.y) / rescaled_chunk_->info.resolution);
+
+            draw_inflated_line(x0, y0, x1, y1, inflation_radius, value_to_mark);
+        }
+    }
+
+    occupancy_grid_pub_test_->publish(*rescaled_chunk_);
+}
+
+// ============================== Main Function for map rescale ==============================
+cv::Mat local_path_planning_node::toMat(const nav_msgs::msg::OccupancyGrid &map)
+{
+    cv::Mat im(map.info.height, map.info.width, CV_8UC1);
+    for (size_t i = 0; i < map.data.size(); i++)
+    {
+        if (map.data[i] == 0)
+            im.data[i] = 254; // Free space
+        else if (map.data[i] == 100)
+            im.data[i] = 0; // Occupied space
+        else
+            im.data[i] = 205; // Unknown space
+    }
+    return im;
+}
+
+cv::Mat local_path_planning_node::rescaleChunk(const cv::Mat &chunk_mat, double scale_factor)
+{
+    cv::Mat rescaled_chunk;
+    cv::resize(chunk_mat, rescaled_chunk, cv::Size(), scale_factor, scale_factor, cv::INTER_NEAREST);
+    return rescaled_chunk;
+}
+
 vector<pair<double, double>> local_path_planning_node::calculate_trajectory(double steering_angle, double wheelbase, int num_points)
 {
     vector<pair<double, double>> path;
@@ -171,7 +402,7 @@ vector<pair<double, double>> local_path_planning_node::calculate_trajectory(doub
         double theta = 0; // Starting angle
         for (int i = 0; i <= num_points; ++i)
         {
-            double x = radius * sin(theta) + start_offset; // Start 0.5 meters in front
+            double x = radius * sin(theta) + start_offset; // Start start_offset m in front
             double y = radius * (1 - cos(theta));
 
             if (steering_angle < 0)
@@ -235,11 +466,9 @@ void local_path_planning_node::extract_segment(const std::vector<std::pair<doubl
 void local_path_planning_node::roadElementsCallback(const traffic_information_msgs::msg::RoadElementsCollection::SharedPtr msg)
 {
 
-    getCurrentRobotState();
-
     if (waypoints->empty())
     {
-        std::cout << red << "Warning: waypoints is not available. Skipping collision check." << reset << std::endl;
+        std::cout << red << "Warning: waypoints is not available. Skipping crosswalk calculation." << reset << std::endl;
         return;
     }
 
@@ -261,7 +490,7 @@ void local_path_planning_node::roadElementsCallback(const traffic_information_ms
     // Close the square by connecting back to the first point
     base_square.points.push_back(base_square.points[0]);
 
-    for (size_t i = closest_waypoint; i < waypoints->size(); ++i) // Go through waypoints in sequence
+    for (size_t i = closest_waypoint; i < waypoints->size(); ++i)
     {
         const auto &waypoint = waypoints->at(i);
         double x = waypoint(0);
@@ -273,7 +502,7 @@ void local_path_planning_node::roadElementsCallback(const traffic_information_ms
             waypoints_segmentation->push_back(waypoint);
         }
 
-        // Create a translated square polygon around the current waypoint
+        // translated square polygon around the current waypoint
         geometry_msgs::msg::Polygon waypoint_poly = base_square;
         for (auto &point : waypoint_poly.points)
         {
@@ -320,60 +549,17 @@ void local_path_planning_node::roadElementsCallback(const traffic_information_ms
 
     // check if the crosswalk has been visited
     crosswalk_visited_check(first_crosswalk);
+    compute_path_polygon();
 
     // Output the ID of the nearest crosswalk
-    cout << "First crosswalk id: " << first_crosswalk.id << endl;
-    cout << "Segment start index: " << segment_start_index << endl;
-    cout << "Segment start index temp: " << segment_start_index_temp << endl;
-
-    // Create and publish the MarkerArray for the segmented waypoints
-    visualization_msgs::msg::MarkerArray marker_array;
-    int marker_id = 0;
-
-    for (const auto &waypoint : *waypoints_segmentation)
-    {
-        visualization_msgs::msg::Marker marker;
-        marker.header.frame_id = "map"; // Set your frame of reference
-        marker.header.stamp = this->now();
-        marker.ns = "waypoints";
-        marker.id = marker_id++; // Unique ID for each marker
-        marker.type = visualization_msgs::msg::Marker::SPHERE;
-        marker.action = visualization_msgs::msg::Marker::ADD;
-
-        // Set the position from the waypoint
-        marker.pose.position.x = waypoint(0);
-        marker.pose.position.y = waypoint(1);
-        marker.pose.position.z = 0.0; // Assuming 2D waypoints
-
-        // Set the orientation from the yaw in waypoint(3)
-        tf2::Quaternion q;
-        q.setRPY(0, 0, waypoint(3));
-        marker.pose.orientation.x = q.x();
-        marker.pose.orientation.y = q.y();
-        marker.pose.orientation.z = q.z();
-        marker.pose.orientation.w = q.w();
-
-        // Set the scale of the marker
-        marker.scale.x = 0.3;
-        marker.scale.y = 0.3;
-        marker.scale.z = 0.3;
-
-        // Set the color of the marker
-        marker.color.r = 0.0f;
-        marker.color.g = 1.0f;
-        marker.color.b = 0.0f;
-        marker.color.a = 1.0f; // Fully opaque
-
-        marker_array.markers.push_back(marker);
-    }
-
-    crosswalk_marker_publisher_->publish(marker_array);
+    // cout << "First crosswalk id: " << first_crosswalk.id << endl;
+    // cout << "Segment start index: " << segment_start_index_temp << endl;
+    // cout << "Segment end index: " << segment_start_index << endl;
 }
 
 void local_path_planning_node::obstacle_info_callback(const obstacles_information_msgs::msg::ObstacleCollection::SharedPtr msg)
 {
 
-    collision_vector->clear();
     // Check if vehicle_path is available or valid
     if (vehicle_path->points.empty())
     {
@@ -381,17 +567,36 @@ void local_path_planning_node::obstacle_info_callback(const obstacles_informatio
         return;
     }
 
-    collision_detected = false;
+    // auto init_time = std::chrono::system_clock::now();
+
+    getCurrentRobotState();
+
+    collision_vector->clear();
+
+    collision_detected_trajectory = false;
+    collision_detected_path = false;
     for (const auto &obstacle : msg->obstacles)
     {
         bool current_collision = collision_checker.check_collision(*vehicle_path, obstacle.polygon);
         collision_vector->push_back(current_collision);
-
         if (current_collision)
         {
-            collision_detected = true;
+            collision_detected_trajectory = true;
         }
     }
+
+    // std::cout << green << "---> Collision detected trajectory: " << collision_detected_trajectory << reset << std::endl;
+
+    map_combination(msg);
+
+    // if (collision_detected_trajectory)
+    // {
+    //     map_combination(msg);
+    // }
+
+    // auto end_time = std::chrono::system_clock::now();
+    // auto duration = std::chrono::duration_cast<std::chrono::milliseconds>(end_time - init_time).count();
+    // cout << blue << "Execution time for collision checker and map conbination: " << duration << " ms" << reset << endl;
 }
 
 void local_path_planning_node::yawCarCallback(const std_msgs::msg::Float64::SharedPtr msg)
@@ -422,7 +627,7 @@ void local_path_planning_node::yawCarCallback(const std_msgs::msg::Float64::Shar
     lane_maker.scale.z = 0.5;
     lane_maker.color.a = 1.0;
 
-    if (collision_detected)
+    if (collision_detected_trajectory)
     {
         lane_maker.color.r = 1.0;
         lane_maker.color.g = 0.0;
@@ -485,6 +690,11 @@ void local_path_planning_node::yawCarCallback(const std_msgs::msg::Float64::Shar
     // cout << blue << "Execution time for path creation: " << duration << " ms" << reset << endl;
 
     lane_steering_publisher_->publish(lane_maker);
+}
+
+void local_path_planning_node::globalMap_callback(const nav_msgs::msg::OccupancyGrid::SharedPtr map)
+{
+    global_map_ = map;
 }
 
 int main(int argc, char **argv)
