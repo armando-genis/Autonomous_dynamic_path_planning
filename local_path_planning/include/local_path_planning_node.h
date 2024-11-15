@@ -17,6 +17,9 @@
 // Eigen (must be included before OpenCV!!)
 #include <Eigen/Dense>
 
+// path nav msgs
+#include <nav_msgs/msg/path.hpp>
+
 // OpenCV
 #include <opencv2/opencv.hpp>
 #include <opencv2/imgproc.hpp>
@@ -32,8 +35,10 @@
 
 // STA collision checker
 #include "sat_collision_checker.h"
-// state file
+// state, grid map & cardata file
 #include "State.h"
+#include "Grid_map.h"
+#include "CarData.h"
 
 // C++
 #include <iostream>
@@ -68,6 +73,14 @@ private:
     int segment_start_index_temp = 0;
     int closest_waypoint = 0;
 
+    // variables for the path prossecing
+    double lateral_range = 1.5;    // Maximum lateral distance for sampling (in meters)
+    double lateral_spacing = 1.0;  // Spacing between lateral samples (in meters)
+    double search_threshold = 1.0; // Minimum distance from obstacles (in meters)
+
+    // Grid Map
+    std::shared_ptr<Grid_map> grid_map_;
+
     std::shared_ptr<std::vector<bool>> collision_vector;
     std::shared_ptr<geometry_msgs::msg::Polygon> vehicle_path;
     std::shared_ptr<geometry_msgs::msg::Polygon> segment_path;
@@ -91,6 +104,10 @@ private:
 
     // function to compute the polygon of the path
     void compute_path_polygon();
+
+    // function to compute the routs
+    void sampleLayersAlongPath();
+    double computeCost(const Eigen::VectorXd &point, const Eigen::VectorXd &prev_point);
 
     // Callback function
     void obstacle_info_callback(const obstacles_information_msgs::msg::ObstacleCollection::SharedPtr msg);
@@ -126,6 +143,8 @@ private:
     rclcpp::Subscription<nav_msgs::msg::OccupancyGrid>::SharedPtr global_grid_map_sub_;
     // publisher for the occupancy grid
     rclcpp::Publisher<nav_msgs::msg::OccupancyGrid>::SharedPtr occupancy_grid_pub_test_;
+    // publisher for the path
+    rclcpp::Publisher<nav_msgs::msg::Path>::SharedPtr path_publisher_;
 
 public:
     local_path_planning_node(/* args */);

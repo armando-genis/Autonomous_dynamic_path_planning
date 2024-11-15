@@ -27,6 +27,8 @@ local_path_planning_node::local_path_planning_node(/* args */) : Node("local_pat
     occupancy_grid_pub_test_ = this->create_publisher<nav_msgs::msg::OccupancyGrid>(
         "/occupancy_grid_obstacles", 10);
 
+    path_publisher_ = this->create_publisher<nav_msgs::msg::Path>("path_related", 10);
+
     vehicle_path = std::make_shared<geometry_msgs::msg::Polygon>();
     segment_path = std::make_shared<geometry_msgs::msg::Polygon>();
     collision_vector = std::make_shared<std::vector<bool>>();
@@ -164,7 +166,8 @@ void local_path_planning_node::compute_path_polygon()
     segment_path->points.push_back(segment_path->points.front());
 }
 
-double local_path_planning_node::getDistanceFromOdom(Eigen::VectorXd wapointPoint)
+double
+local_path_planning_node::getDistanceFromOdom(Eigen::VectorXd wapointPoint)
 {
     double x1 = wapointPoint(0);
     double y1 = wapointPoint(1);
@@ -172,6 +175,88 @@ double local_path_planning_node::getDistanceFromOdom(Eigen::VectorXd wapointPoin
     double y2 = car_state_->y;
     double distance = sqrt(pow(x1 - x2, 2) + pow(y1 - y2, 2));
     return distance;
+}
+
+void local_path_planning_node::sampleLayersAlongPath()
+{
+
+    if (waypoints_segmentation->empty())
+    {
+        std::cout << red << "Warning: waypoints segmentation is not available. Skipping polygon path creation." << reset << std::endl;
+        return;
+    }
+
+    if (rescaled_chunk_->data.empty())
+    {
+        std::cout << red << "Warning: combined map is not available. Skipping polygon path creation." << reset << std::endl;
+        return;
+    }
+
+    // std::shared_ptr<vector<Eigen::VectorXd>> waypoints_segmentation; [x, y, z, yaw] for each waypoint
+
+    // MarkerArray to hold all markers
+    visualization_msgs::msg::MarkerArray marker_array;
+    int marker_id = 0;
+
+    grid_map_ = std::make_shared<Grid_map>(*rescaled_chunk_);
+    std::vector<std::vector<Eigen::VectorXd>> layers_samples;
+
+    for (const auto &waypoint : *waypoints_segmentation)
+    {
+        double x = waypoint(0);
+        double y = waypoint(1);
+        double yaw = waypoint(3);
+        std::vector<Eigen::VectorXd> layer_points;
+
+        for (double lateral_offset = -lateral_range; lateral_offset <= lateral_range; lateral_offset += lateral_spacing)
+        {
+            Eigen::VectorXd sample_point(3);
+            sample_point(0) = x + lateral_offset * cos(yaw + M_PI_2);
+            sample_point(1) = y + lateral_offset * sin(yaw + M_PI_2);
+            sample_point(2) = yaw;
+
+            Eigen::Vector2d pos(sample_point(0), sample_point(1));
+            double obstacle_distance = grid_map_->getObstacleDistance(pos);
+            if (obstacle_distance > search_threshold)
+            {
+                layer_points.push_back(sample_point);
+
+                // Create a marker for this point
+                visualization_msgs::msg::Marker marker;
+                marker.header.frame_id = "map"; // Set appropriate frame ID
+                marker.header.stamp = rclcpp::Clock().now();
+                marker.ns = "sampled_points";
+                marker.id = marker_id++;
+                marker.type = visualization_msgs::msg::Marker::SPHERE;
+                marker.action = visualization_msgs::msg::Marker::ADD;
+                marker.pose.position.x = sample_point(0);
+                marker.pose.position.y = sample_point(1);
+                marker.pose.position.z = 0.0; // Adjust if needed
+                marker.scale.x = 0.4;         // Diameter of the sphere
+                marker.scale.y = 0.4;
+                marker.scale.z = 0.4;
+                marker.color.a = 1.0; // Alpha (1.0 is fully opaque)
+                marker.color.r = 0.0; // Customize color as desired
+                marker.color.g = 1.0;
+                marker.color.b = 0.0;
+                marker.lifetime = rclcpp::Duration(0, 0); // Persistent markers
+                marker_array.markers.push_back(marker);
+            }
+        }
+        layers_samples.push_back(layer_points);
+    }
+    crosswalk_marker_publisher_->publish(marker_array);
+}
+
+double local_path_planning_node::computeCost(const Eigen::VectorXd &point, const Eigen::VectorXd &prev_point)
+{
+    // Example costs based on deviation and obstacle proximity
+    double obstacle_distance = grid_map_->getObstacleDistance(Eigen::Vector2d(point(0), point(1)));
+    double deviation_cost = fabs(point(1) - prev_point(1)); // Penalize large lateral changes
+    double obstacle_cost = obstacle_distance < search_threshold ? (1.0 - (obstacle_distance / search_threshold)) : 0.0;
+    double smoothness_cost = fabs(point(2) - prev_point(2)); // Penalize heading changes
+
+    return deviation_cost * 0.5 + obstacle_cost * 1.0 + smoothness_cost * 0.3; // Weighted sum of costs
 }
 
 void local_path_planning_node::waypoints_callback(const visualization_msgs::msg::MarkerArray::SharedPtr msg)
@@ -567,7 +652,7 @@ void local_path_planning_node::obstacle_info_callback(const obstacles_informatio
         return;
     }
 
-    // auto init_time = std::chrono::system_clock::now();
+    auto init_time = std::chrono::system_clock::now();
 
     getCurrentRobotState();
 
@@ -588,15 +673,16 @@ void local_path_planning_node::obstacle_info_callback(const obstacles_informatio
     // std::cout << green << "---> Collision detected trajectory: " << collision_detected_trajectory << reset << std::endl;
 
     map_combination(msg);
+    sampleLayersAlongPath();
 
     // if (collision_detected_trajectory)
     // {
     //     map_combination(msg);
     // }
 
-    // auto end_time = std::chrono::system_clock::now();
-    // auto duration = std::chrono::duration_cast<std::chrono::milliseconds>(end_time - init_time).count();
-    // cout << blue << "Execution time for collision checker and map conbination: " << duration << " ms" << reset << endl;
+    auto end_time = std::chrono::system_clock::now();
+    auto duration = std::chrono::duration_cast<std::chrono::milliseconds>(end_time - init_time).count();
+    cout << blue << "Execution time for collision checker and map conbination: " << duration << " ms" << reset << endl;
 }
 
 void local_path_planning_node::yawCarCallback(const std_msgs::msg::Float64::SharedPtr msg)

@@ -18,10 +18,10 @@ find_package(tf2_geometry_msgs REQUIRED)
 find_package(nav_msgs REQUIRED)
 find_package(obstacles_information_msgs REQUIRED)
 find_package(traffic_information_msgs REQUIRED)
+find_package(grid_map_ros REQUIRED)
+
 
 find_package(OpenCV REQUIRED)
-
-
 
 # External dependencies
 find_package(Eigen3 REQUIRED)
@@ -29,6 +29,8 @@ find_package(Eigen3 REQUIRED)
 add_executable(local_path_planning_node
                src/local_path_planning_node.cpp
                src/sat_collision_checker.cc
+               src/Grid_map.cpp
+               src/CarData.cpp
                )
 
 # Link libraries
@@ -36,6 +38,7 @@ ament_target_dependencies(local_path_planning_node
   rclcpp
   std_msgs
   sensor_msgs
+  grid_map_ros
   geometry_msgs
   visualization_msgs
   tf2
