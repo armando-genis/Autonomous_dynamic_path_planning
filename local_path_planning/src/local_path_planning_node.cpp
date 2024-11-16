@@ -135,6 +135,24 @@ void local_path_planning_node::compute_path_polygon()
 
     segment_path->points.clear();
 
+    // Prepare Marker for visualization
+    visualization_msgs::msg::Marker lane_maker;
+    lane_maker.header.frame_id = "map";
+    lane_maker.header.stamp = this->now();
+
+    lane_maker.ns = "vehicle_path";
+    lane_maker.id = 0;
+    lane_maker.type = visualization_msgs::msg::Marker::LINE_STRIP;
+    lane_maker.action = visualization_msgs::msg::Marker::ADD;
+    lane_maker.scale.x = 0.07;
+    lane_maker.scale.y = 0.5;
+    lane_maker.scale.z = 0.5;
+    lane_maker.color.a = 1.0;
+
+    lane_maker.color.r = 1.0;
+    lane_maker.color.g = 0.0;
+    lane_maker.color.b = 0.0;
+
     // Publish lane with the track of the path for the left side
     for (size_t i = 0; i < waypoints_segmentation->size(); ++i)
     {
@@ -147,6 +165,12 @@ void local_path_planning_node::compute_path_polygon()
         converted_point.y = waypoints_segmentation->at(i)(1) + offset_y;
         converted_point.z = 0.0;
         segment_path->points.push_back(converted_point);
+
+        geometry_msgs::msg::Point left_point;
+        left_point.x = converted_point.x;
+        left_point.y = converted_point.y;
+        left_point.z = 0.0;
+        lane_maker.points.push_back(left_point);
     }
 
     //  invertion of the right side to math with the left side
@@ -161,9 +185,17 @@ void local_path_planning_node::compute_path_polygon()
         converted_point.y = waypoints_segmentation->at(i)(1) - offset_y;
         converted_point.z = 0.0;
         segment_path->points.push_back(converted_point);
+
+        geometry_msgs::msg::Point right_point;
+        right_point.x = converted_point.x;
+        right_point.y = converted_point.y;
+        right_point.z = 0.0;
+        lane_maker.points.push_back(right_point);
     }
 
     segment_path->points.push_back(segment_path->points.front());
+    lane_maker.points.push_back(lane_maker.points.front());
+    lane_steering_publisher_->publish(lane_maker);
 }
 
 double
@@ -191,8 +223,6 @@ void local_path_planning_node::sampleLayersAlongPath()
         std::cout << red << "Warning: combined map is not available. Skipping polygon path creation." << reset << std::endl;
         return;
     }
-
-    // std::shared_ptr<vector<Eigen::VectorXd>> waypoints_segmentation; [x, y, z, yaw] for each waypoint
 
     // MarkerArray to hold all markers
     visualization_msgs::msg::MarkerArray marker_array;
@@ -775,7 +805,7 @@ void local_path_planning_node::yawCarCallback(const std_msgs::msg::Float64::Shar
     // auto duration = std::chrono::duration_cast<std::chrono::milliseconds>(end_time - init_time).count();
     // cout << blue << "Execution time for path creation: " << duration << " ms" << reset << endl;
 
-    lane_steering_publisher_->publish(lane_maker);
+    // lane_steering_publisher_->publish(lane_maker);
 }
 
 void local_path_planning_node::globalMap_callback(const nav_msgs::msg::OccupancyGrid::SharedPtr map)
