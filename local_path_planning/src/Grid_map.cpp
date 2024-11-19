@@ -306,12 +306,12 @@ bool Grid_map::isSingleStateCollisionFreeImproved(const State &current)
         else
         {
             // No collision if clearance is larger than the bounding circle's radius
-            return true;
+            return false;
         }
     }
     else
     {
         // If out of bounds, consider it a collision
-        return false;
+        return true;
     }
 }

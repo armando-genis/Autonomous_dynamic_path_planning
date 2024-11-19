@@ -31,6 +31,7 @@ add_executable(local_path_planning_node
                src/sat_collision_checker.cc
                src/Grid_map.cpp
                src/CarData.cpp
+               src/CubicSpline1D.cpp
                )
 
 # Link libraries
@@ -67,7 +68,7 @@ target_link_libraries(local_path_planning_node
 
 # Install other files (e.g., launch files)
 install(
-  DIRECTORY launch src
+  DIRECTORY launch src config
   DESTINATION share/${PROJECT_NAME}
 )
 

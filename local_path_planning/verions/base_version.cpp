@@ -43,7 +43,7 @@ local_path_planning_node::local_path_planning_node(/* args */) : Node("local_pat
     occupancy_grid_pub_test_ = this->create_publisher<nav_msgs::msg::OccupancyGrid>(
         "/occupancy_grid_obstacles", 10);
 
-    path_publisher_ = this->create_publisher<nav_msgs::msg::Path>("path_waypoints", 10);
+    path_publisher_ = this->create_publisher<nav_msgs::msg::Path>("path_related", 10);
 
     vehicle_path = std::make_shared<geometry_msgs::msg::Polygon>();
     segment_path = std::make_shared<geometry_msgs::msg::Polygon>();
@@ -52,15 +52,12 @@ local_path_planning_node::local_path_planning_node(/* args */) : Node("local_pat
     car_state_ = std::make_shared<State>();
     waypoints_segmentation = std::make_shared<vector<Eigen::VectorXd>>();
     waypoints_historical = std::make_shared<vector<Eigen::VectorXd>>();
-    optimal_path = std::make_shared<vector<Eigen::VectorXd>>();
     global_map_ = std::make_shared<nav_msgs::msg::OccupancyGrid>();
     rescaled_chunk_ = std::make_shared<nav_msgs::msg::OccupancyGrid>();
 
     // Create the vehicle geometry
     car_data_ = CarData(maxSteerAngle, wheelBase, axleToFront, axleToBack, width);
     car_data_.createVehicleGeometry();
-
-    motionCommands();
 
     // log out parameters in blue color
     RCLCPP_INFO(this->get_logger(), "\033[1;34mmaxSteerAngle: %f\033[0m", maxSteerAngle);
@@ -76,18 +73,6 @@ local_path_planning_node::local_path_planning_node(/* args */) : Node("local_pat
 
 local_path_planning_node::~local_path_planning_node()
 {
-}
-
-void local_path_planning_node::motionCommands()
-{
-    int direction = 1;
-    double steep = car_data_.maxSteerAngle / 2;
-
-    for (double i = car_data_.maxSteerAngle; i >= -car_data_.maxSteerAngle; i -= steep)
-    {
-        // fist data: steering angle, second data: direction
-        motionCommand.push_back({i, static_cast<double>(direction)});
-    }
 }
 
 void local_path_planning_node::getCurrentRobotState()
@@ -276,9 +261,6 @@ void local_path_planning_node::sampleLayersAlongPath()
     grid_map_->setcarData(car_data_);
     std::vector<std::vector<Eigen::VectorXd>> layers_samples;
 
-    int path_length = 2; // 4 meters
-    double car_step_size = 2.0;
-
     for (const auto &waypoint : *waypoints_segmentation)
     {
         double x = waypoint(0);
@@ -286,86 +268,77 @@ void local_path_planning_node::sampleLayersAlongPath()
         double yaw = waypoint(3);
         std::vector<Eigen::VectorXd> layer_points;
 
-        // add the waypoints to the marker array
-        visualization_msgs::msg::Marker marker;
-        marker.header.frame_id = "map";
-        marker.header.stamp = this->now();
-        marker.ns = "waypoints";
-        marker.id = marker_id++;
-        marker.type = visualization_msgs::msg::Marker::SPHERE;
-        marker.action = visualization_msgs::msg::Marker::ADD;
-        marker.pose.position.x = x;
-        marker.pose.position.y = y;
-        marker.pose.position.z = 0.0;
-        marker.scale.x = 0.5;
-        marker.scale.y = 0.5;
-        marker.scale.z = 0.5;
-        marker.color.a = 1.0;
-        marker.color.r = 1.0;
-        marker.color.g = 0.0;
-        marker.color.b = 0.0;
-        marker_array.markers.push_back(marker);
+        // for the waypoints
 
-        // for the center waypoint
-        State WaypointState_;
-        WaypointState_.x = x;
-        WaypointState_.y = y;
-        WaypointState_.heading = yaw;
-
-        // Check if the center waypoint is collision free
-        bool collision = grid_map_->isSingleStateCollisionFreeImproved(WaypointState_);
-
-        if (!collision)
+        // for the lateral points
+        for (double lateral_offset = -lateral_range; lateral_offset <= lateral_range; lateral_offset += lateral_spacing)
         {
+            Eigen::VectorXd sample_point(3);
+            sample_point(0) = x + lateral_offset * cos(yaw + M_PI_2);
+            sample_point(1) = y + lateral_offset * sin(yaw + M_PI_2);
+            sample_point(2) = yaw;
 
-            State initial_state = WaypointState_;
-            for (const auto &command : motionCommand)
+            Eigen::Vector2d pos(sample_point(0), sample_point(1));
+
+            State CurrentState_;
+            CurrentState_.x = sample_point(0);
+            CurrentState_.y = sample_point(1);
+            CurrentState_.heading = sample_point(2);
+
+            double obstacle_distance = grid_map_->getObstacleDistance(pos);
+            bool collision = grid_map_->isSingleStateCollisionFreeImproved(CurrentState_);
+
+            // if ((obstacle_distance > search_threshold))
+            if (!collision)
             {
-                vector<State> traj;
-                for (int i = 0; i < path_length; ++i)
-                {
-                    State next_state = car_data_.getVehicleStep(WaypointState_, command[0], command[1], car_step_size);
-                    traj.push_back(next_state);
-                    WaypointState_ = next_state;
-                }
-                bool has_collision = false;
-                for (const auto &state : traj)
-                {
-                    if (grid_map_->isSingleStateCollisionFreeImproved(state))
-                    {
-                        has_collision = true;
-                        break;
-                    }
-                }
+                layer_points.push_back(sample_point);
 
-                if (!has_collision)
-                {
-
-                    visualization_msgs::msg::Marker marker;
-                    marker.header.frame_id = "map";
-                    marker.header.stamp = this->now();
-                    marker.ns = "sampled_points";
-                    marker.id = marker_id++;
-                    marker.type = visualization_msgs::msg::Marker::SPHERE;
-                    marker.action = visualization_msgs::msg::Marker::ADD;
-                    // get the last point of the trajectory
-                    marker.pose.position.x = traj.back().x;
-                    marker.pose.position.y = traj.back().y;
-                    marker.pose.position.z = 0.0;
-                    marker.scale.x = 0.5;
-                    marker.scale.y = 0.5;
-                    marker.scale.z = 0.5;
-                    marker.color.a = 1.0;
-                    marker.color.r = 0.0;
-                    marker.color.g = 1.0;
-                    marker.color.b = 0.0;
-                    marker_array.markers.push_back(marker);
-                }
-                traj.clear();
-                WaypointState_ = initial_state;
+                // Create a marker for this point
+                visualization_msgs::msg::Marker marker;
+                marker.header.frame_id = "map"; // Set appropriate frame ID
+                marker.header.stamp = rclcpp::Clock().now();
+                marker.ns = "sampled_points";
+                marker.id = marker_id++;
+                marker.type = visualization_msgs::msg::Marker::SPHERE;
+                marker.action = visualization_msgs::msg::Marker::ADD;
+                marker.pose.position.x = sample_point(0);
+                marker.pose.position.y = sample_point(1);
+                marker.pose.position.z = 0.0; // Adjust if needed
+                marker.scale.x = 0.4;         // Diameter of the sphere
+                marker.scale.y = 0.4;
+                marker.scale.z = 0.4;
+                marker.color.a = 1.0; // Alpha (1.0 is fully opaque)
+                marker.color.r = 0.0; // Customize color as desired
+                marker.color.g = 1.0;
+                marker.color.b = 0.0;
+                marker.lifetime = rclcpp::Duration(0, 0); // Persistent markers
+                marker_array.markers.push_back(marker);
             }
         }
+        // If there are points in the layer, add them to the list
+        if (layer_points.size() > 0)
+        {
+            layers_samples.push_back(layer_points);
+        }
     }
+
+    // add the points of the layers sample and cout out them
+    int layer_points_count = 0;
+    for (const auto &layer : layers_samples)
+    {
+        layer_points_count += layer.size();
+    }
+
+    // cout the layer points count
+    std::cout << green << "---> Layer points count: " << layer_points_count << reset << std::endl;
+
+    // cout waypoints_segmentation size
+    std::cout << green << "---> waypoints_segmentation size: " << waypoints_segmentation->size() << reset << std::endl;
+    std::cout << green << "---> Number of layers: " << layers_samples.size() << reset << std::endl;
+
+    // cout the markers size
+    std::cout << green << "--->Markers size: " << marker_array.markers.size() << reset << std::endl;
+
     crosswalk_marker_publisher_->publish(marker_array);
 }
 
@@ -377,27 +350,25 @@ double local_path_planning_node::computeCost(const Eigen::VectorXd &point, const
     double obstacle_distance = grid_map_->getObstacleDistance(pos);
     double safety_distance = 5.0; // Define as appropriate
 
-    // If the point is close to an obstacle, increase the cost proportionally
     if (obstacle_distance < safety_distance)
     {
         obstacle_cost = (safety_distance - obstacle_distance) / safety_distance * FLAGS_search_obstacle_cost;
     }
 
-    // Deviation cost (penalizes lateral deviation, relative to the previous point)
+    // Deviation cost calculation (penalizes lateral deviation from the reference path)
     double offset_cost = fabs(point(1) - prev_point(1)) / FLAGS_search_lateral_range * FLAGS_search_deviation_cost;
 
-    // Smoothness cost (penalizes sharp heading changes)
+    // Smoothness cost calculation (penalizes sharp heading changes)
     double smoothness_cost = fabs(point(2) - prev_point(2)) * FLAGS_smoothness_weight;
 
     // Proximity cost (using limited waypoint search based on layer index)
     double proximity_cost = 0.0;
     double min_distance_to_waypoint = std::numeric_limits<double>::max();
 
-    // Define a search window around the current waypoint index
+    // Define search window around the current waypoint index
     int start_idx = std::max(0, layer_idx - 3);
     int end_idx = std::min(static_cast<int>(waypoints_segmentation->size()) - 1, layer_idx + 3);
 
-    // Find the nearest waypoint within the limited range to encourage staying close to the reference path
     for (int i = start_idx; i <= end_idx; ++i)
     {
         const auto &waypoint = waypoints_segmentation->at(i);
@@ -408,77 +379,11 @@ double local_path_planning_node::computeCost(const Eigen::VectorXd &point, const
         }
     }
 
-    // Set the proximity cost with a high weight, encouraging path points close to the reference path
-    proximity_cost = min_distance_to_waypoint * FLAGS_proximity_weight;
+    // Proximity cost encourages path points to stay close to the reference path
+    proximity_cost = min_distance_to_waypoint * 0.5;
 
     // Total cost combining obstacle, deviation, smoothness, and proximity costs
-    return obstacle_cost + offset_cost * 0.5 + smoothness_cost * 0.2 + proximity_cost;
-}
-
-void local_path_planning_node::computeSplitpath()
-{
-    if (optimal_path->empty())
-    {
-        // RCLCPP_WARN(this->get_logger(), "Optimal path is empty.");
-        return;
-    }
-
-    if (optimal_path->size() < 2)
-    {
-        RCLCPP_WARN(this->get_logger(), "Insufficient points in optimal path for spline interpolation.");
-        return;
-    }
-
-    std::vector<double> t_values(optimal_path->size());
-    std::iota(t_values.begin(), t_values.end(), 0);
-
-    std::vector<double> x;
-    std::vector<double> y;
-
-    for (size_t i = 0; i < optimal_path->size(); ++i)
-    {
-        const auto &point = optimal_path->at(i);
-
-        if (point.rows() >= 2 && point.cols() == 1)
-        {
-            // Ensure the matrix is a column vector with at least 2 rows
-            x.push_back(point(0, 0));
-            y.push_back(point(1, 0));
-        }
-    }
-
-    if (x.empty() || y.empty())
-    {
-        // RCLCPP_ERROR(this->get_logger(), "No valid points in optimal path to create a spline.");
-        return;
-    }
-
-    CubicSpline1D spline_x(t_values, x);
-    CubicSpline1D spline_y(t_values, y);
-
-    std::vector<double> x_new, y_new;
-
-    for (double t = 0; t < t_values.size() - 1; t += 0.25)
-    {
-        x_new.push_back(spline_x.calc_der0(t));
-        y_new.push_back(spline_y.calc_der0(t));
-    }
-
-    // Publish the path
-    nav_msgs::msg::Path path_msg;
-    path_msg.header.frame_id = "map";
-    path_msg.header.stamp = rclcpp::Clock().now();
-
-    for (size_t i = 0; i < x_new.size(); ++i)
-    {
-        geometry_msgs::msg::PoseStamped pose;
-        pose.pose.position.x = x_new[i];
-        pose.pose.position.y = y_new[i];
-        pose.pose.position.z = 0.0;
-        path_msg.poses.push_back(pose);
-    }
-
-    path_publisher_->publish(path_msg);
+    return offset_cost + obstacle_cost + smoothness_cost + proximity_cost;
 }
 
 void local_path_planning_node::waypoints_callback(const visualization_msgs::msg::MarkerArray::SharedPtr msg)
