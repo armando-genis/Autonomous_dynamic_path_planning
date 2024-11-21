@@ -42,6 +42,10 @@
 #include "CubicSpline1D.h"
 #include "HybridAstar.h"
 #include "Node.h"
+
+// tinyspline
+#include <tinysplinecxx.h>
+
 // C++
 #include <iostream>
 #include <vector>
@@ -97,6 +101,7 @@ private:
     double FLAGS_smoothness_weight = 0.3;     // Increased to discourage abrupt heading changes
     double FLAGS_curvature_weight = 1.0;      // Penalty for sharp turns to promote smooth paths
     double FLAGS_proximity_weight = 4.5;      // Keeps path near reference unless obstacles force deviation
+    double FLAGS_persistence_weight = 0.5;
 
     // Grid Map
     std::shared_ptr<Grid_map> grid_map_;
@@ -174,8 +179,6 @@ private:
     rclcpp::Publisher<nav_msgs::msg::OccupancyGrid>::SharedPtr occupancy_grid_pub_test_;
     // publisher for the path
     rclcpp::Publisher<nav_msgs::msg::Path>::SharedPtr path_publisher_;
-    // publisher for the start and end arrows
-    rclcpp::Publisher<visualization_msgs::msg::MarkerArray>::SharedPtr arrow_pub_;
 
 public:
     local_path_planning_node(/* args */);

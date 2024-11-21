@@ -19,6 +19,8 @@ find_package(nav_msgs REQUIRED)
 find_package(obstacles_information_msgs REQUIRED)
 find_package(traffic_information_msgs REQUIRED)
 find_package(grid_map_ros REQUIRED)
+set(tinysplinecxx_DIR "/usr/local/lib64/cmake/tinysplinecxx/")
+
 
 
 find_package(OpenCV REQUIRED)
@@ -67,6 +69,7 @@ install(TARGETS
 
 target_link_libraries(local_path_planning_node
   Eigen3::Eigen
+  tinysplinecxx
 )
 
 # Install other files (e.g., launch files)
