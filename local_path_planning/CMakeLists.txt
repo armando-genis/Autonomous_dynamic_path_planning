@@ -27,11 +27,14 @@ find_package(OpenCV REQUIRED)
 find_package(Eigen3 REQUIRED)
 
 add_executable(local_path_planning_node
-               src/local_path_planning_node.cpp
-               src/sat_collision_checker.cc
-               src/Grid_map.cpp
-               src/CarData.cpp
-               src/CubicSpline1D.cpp
+                src/local_path_planning_node.cpp
+                src/sat_collision_checker.cc
+                src/Grid_map.cpp
+                src/CarData.cpp
+                src/CubicSpline1D.cpp
+                src/HybridAstar.cpp
+                src/reeds_shepp_path.cpp
+                src/dubins_path.cpp
                )
 
 # Link libraries

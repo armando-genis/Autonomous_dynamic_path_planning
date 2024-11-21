@@ -40,7 +40,8 @@
 #include "Grid_map.h"
 #include "CarData.h"
 #include "CubicSpline1D.h"
-
+#include "HybridAstar.h"
+#include "Node.h"
 // C++
 #include <iostream>
 #include <vector>
@@ -90,11 +91,12 @@ private:
     double lateral_range = 1.5;               // Maximum lateral distance for sampling (in meters)
     double lateral_spacing = 1.0;             // Spacing between lateral samples (in meters)
     double search_threshold = 1.5;            // Minimum distance from obstacles (in meters)
-    double FLAGS_search_lateral_range = 2.0;  // Lateral range for path flexibility
-    double FLAGS_search_deviation_cost = 3.0; // Cost for deviation from lateral position
-    double FLAGS_smoothness_weight = 0.2;     // Weight for smooth transitions (low)
-    double FLAGS_search_obstacle_cost = 10.0; // Penalty for proximity to obstacles
-    double FLAGS_proximity_weight = 2.5;      // Strong weight for staying near reference path
+    double FLAGS_search_obstacle_cost = 10.0; // Obstacle avoidance cost
+    double FLAGS_search_lateral_range = 2.0;  // Max lateral range allowed
+    double FLAGS_search_deviation_cost = 5.0; // Cost for deviating laterally
+    double FLAGS_smoothness_weight = 0.3;     // Increased to discourage abrupt heading changes
+    double FLAGS_curvature_weight = 1.0;      // Penalty for sharp turns to promote smooth paths
+    double FLAGS_proximity_weight = 4.5;      // Keeps path near reference unless obstacles force deviation
 
     // Grid Map
     std::shared_ptr<Grid_map> grid_map_;
@@ -108,6 +110,9 @@ private:
     std::shared_ptr<vector<Eigen::VectorXd>> optimal_path;           // [x, y ]
 
     std::shared_ptr<State> car_state_;
+    std::shared_ptr<State> goal_state_;
+
+    // global map
     std::shared_ptr<nav_msgs::msg::OccupancyGrid> global_map_;
     std::shared_ptr<nav_msgs::msg::OccupancyGrid> rescaled_chunk_;
     std::vector<int> skip_ids = {}; // {363, 391};
@@ -131,6 +136,7 @@ private:
     void sampleLayersAlongPath();
     double computeCost(const Eigen::VectorXd &point, const Eigen::VectorXd &prev_point, int layer_idx);
     void computeSplitpath();
+    bool hasLineOfSight(const Eigen::VectorXd &point1, const Eigen::VectorXd &point2);
 
     // Callback function
     void obstacle_info_callback(const obstacles_information_msgs::msg::ObstacleCollection::SharedPtr msg);
@@ -168,6 +174,8 @@ private:
     rclcpp::Publisher<nav_msgs::msg::OccupancyGrid>::SharedPtr occupancy_grid_pub_test_;
     // publisher for the path
     rclcpp::Publisher<nav_msgs::msg::Path>::SharedPtr path_publisher_;
+    // publisher for the start and end arrows
+    rclcpp::Publisher<visualization_msgs::msg::MarkerArray>::SharedPtr arrow_pub_;
 
 public:
     local_path_planning_node(/* args */);

@@ -6,4 +6,4 @@ local_path_planning_node:
     axleToBack: 1.2
     width: 1.9
     pathLength: 4.0
-    step_car: 1.0
+    step_car: 0.5
