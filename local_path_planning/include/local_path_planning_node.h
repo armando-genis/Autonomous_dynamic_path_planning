@@ -100,7 +100,7 @@ private:
     double FLAGS_search_deviation_cost = 5.0; // Cost for deviating laterally
     double FLAGS_smoothness_weight = 0.3;     // Increased to discourage abrupt heading changes
     double FLAGS_curvature_weight = 1.0;      // Penalty for sharp turns to promote smooth paths
-    double FLAGS_proximity_weight = 4.5;      // Keeps path near reference unless obstacles force deviation
+    double FLAGS_proximity_weight = 2.7;      // Keeps path near reference unless obstacles force deviation
     double FLAGS_persistence_weight = 0.5;
 
     // Grid Map
@@ -179,6 +179,7 @@ private:
     rclcpp::Publisher<nav_msgs::msg::OccupancyGrid>::SharedPtr occupancy_grid_pub_test_;
     // publisher for the path
     rclcpp::Publisher<nav_msgs::msg::Path>::SharedPtr path_publisher_;
+    rclcpp::Publisher<nav_msgs::msg::Path>::SharedPtr path_publisher_real;
 
 public:
     local_path_planning_node(/* args */);

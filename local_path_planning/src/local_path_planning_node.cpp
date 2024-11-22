@@ -45,6 +45,8 @@ local_path_planning_node::local_path_planning_node(/* args */) : Node("local_pat
 
     path_publisher_ = this->create_publisher<nav_msgs::msg::Path>("path_waypoints", 10);
 
+    path_publisher_real = this->create_publisher<nav_msgs::msg::Path>("path_waypoints_real", 10);
+
     vehicle_path = std::make_shared<geometry_msgs::msg::Polygon>();
     segment_path = std::make_shared<geometry_msgs::msg::Polygon>();
     collision_vector = std::make_shared<std::vector<bool>>();
@@ -502,8 +504,6 @@ void local_path_planning_node::sampleLayersAlongPath()
     computeSplitpath();
 }
 
-#include <tinysplinecxx.h>
-
 void local_path_planning_node::computeSplitpath()
 {
     if (optimal_path->empty())
@@ -545,12 +545,21 @@ void local_path_planning_node::computeSplitpath()
 
     // Use filtered control points for spline creation
     int degree = std::min(3, static_cast<int>(filtered_control_points.size() / 2) - 1);
+
+    // Ensure degree is non-negative
+    if (degree < 1)
+    {
+        RCLCPP_WARN(this->get_logger(), "Calculated spline degree is invalid.");
+        return;
+    }
     tinyspline::BSpline spline(filtered_control_points.size() / 2, 2, degree);
     spline.setControlPoints(filtered_control_points);
 
     // Number of samples to interpolate along the spline
     const size_t num_samples = 100; // Adjust this value as needed for resolution
     std::vector<tinyspline::real> result = spline.sample(num_samples);
+
+    cout << yellow << "---> Interpolated path size: " << result.size() / 2 << reset << endl;
 
     // Prepare the Path message
     nav_msgs::msg::Path path_msg;     // Fix: Corrected type to nav_msgs::msg::Path
@@ -571,6 +580,67 @@ void local_path_planning_node::computeSplitpath()
     path_publisher_->publish(path_msg);
 
     std::cout << yellow << "---> Path published." << reset << std::endl;
+
+    // ========================================================================================================
+    // check collision with the interpolated path to create a real path
+    // ========================================================================================================
+    // Create a vector to store collision information for each point and the yaw angle
+    // Check if the result has enough points
+    if (result.size() < 4)
+    {
+        RCLCPP_WARN(this->get_logger(), "Resulting path is too short for collision checking.");
+        return;
+    }
+
+    size_t index_to_collision = result.size(); // Default to the end of the result vector
+
+    for (size_t i = 0; i + 3 < result.size(); i += 2)
+    {
+        double x1 = result[i];
+        double y1 = result[i + 1];
+
+        double x2 = result[i + 2];
+        double y2 = result[i + 3];
+
+        // Compute the yaw angle
+        double yaw = atan2(y2 - y1, x2 - x1);
+
+        State state;
+        state.x = x1;
+        state.y = y1;
+        state.heading = yaw;
+
+        // Check for collision
+        bool collision = grid_map_->isSingleStateCollisionFreeImproved(state);
+        if (collision)
+        {
+            // Collision detected at index i
+            index_to_collision = i;
+            break;
+        }
+    }
+
+    // Publish the path until the collision
+    nav_msgs::msg::Path path_msg_real;
+    path_msg_real.header.frame_id = "map";
+    path_msg_real.header.stamp = rclcpp::Clock().now();
+
+    for (size_t i = 0; i <= index_to_collision; i += 2)
+    {
+        if (i + 1 >= result.size())
+            break; // Prevent out-of-bounds access
+
+        geometry_msgs::msg::PoseStamped pose;
+        pose.pose.position.x = result[i];     // x-coordinate
+        pose.pose.position.y = result[i + 1]; // y-coordinate
+        pose.pose.position.z = 0.0;           // Adjust if needed
+        path_msg_real.poses.push_back(pose);
+    }
+
+    // Publish the interpolated path
+    path_publisher_real->publish(path_msg_real);
+
+    std::cout << yellow << "---> Index to collision: <---" << index_to_collision << reset << std::endl;
 }
 
 double local_path_planning_node::computeCost(const Eigen::VectorXd &point, const Eigen::VectorXd &prev_point, int layer_idx)
@@ -579,7 +649,7 @@ double local_path_planning_node::computeCost(const Eigen::VectorXd &point, const
     Eigen::Vector2d pos(point(0), point(1));
     double obstacle_cost = 0.0;
     double obstacle_distance = grid_map_->getObstacleDistance(pos);
-    double safety_distance = 5.0;
+    double safety_distance = 6.0;
 
     if (obstacle_distance < safety_distance)
     {
@@ -608,15 +678,37 @@ double local_path_planning_node::computeCost(const Eigen::VectorXd &point, const
     }
 
     // Persistence penalty: Increase cost if changes are too small or short-lived
-    static const int persistence_threshold = 3; // Minimum number of consecutive waypoints for a change
+    static const int persistence_threshold = 4; // Minimum number of consecutive waypoints for a change
     double persistence_cost = 0.0;
     if (layer_idx < persistence_threshold)
     {
         persistence_cost = curvature_cost * FLAGS_persistence_weight;
     }
 
+    // Proximity cost (encourages staying close to the reference path)
+    double proximity_cost = 0.0;
+    double min_distance_to_waypoint = std::numeric_limits<double>::max();
+
+    // Define a search window around the current waypoint index
+    int start_idx = std::max(0, layer_idx - 3);
+    int end_idx = std::min(static_cast<int>(waypoints_segmentation->size()) - 1, layer_idx + 3);
+
+    // Find the nearest waypoint within the limited range
+    for (int i = start_idx; i <= end_idx; ++i)
+    {
+        const auto &waypoint = waypoints_segmentation->at(i);
+        double distance = sqrt(pow(waypoint(0) - point(0), 2) + pow(waypoint(1) - point(1), 2));
+        if (distance < min_distance_to_waypoint)
+        {
+            min_distance_to_waypoint = distance;
+        }
+    }
+
+    // Apply proximity weight to encourage staying close to the reference path
+    proximity_cost = min_distance_to_waypoint * FLAGS_proximity_weight;
+
     // Total cost
-    return obstacle_cost + offset_cost * 0.5 + smoothness_cost * 0.3 + curvature_cost * 1.0 + persistence_cost;
+    return obstacle_cost + offset_cost * 0.5 + smoothness_cost * 0.3 + curvature_cost * 2.0 + persistence_cost + proximity_cost;
 }
 
 void local_path_planning_node::waypoints_callback(const visualization_msgs::msg::MarkerArray::SharedPtr msg)
@@ -657,12 +749,22 @@ void local_path_planning_node::map_combination(const obstacles_information_msgs:
     // clean the rescaled_chunk_
     rescaled_chunk_->data.clear();
 
-    int chunk_size = 30; // 20 x 20 meters
+    // Compute grid_map_origin position
+    State grid_map_origin;
+    double forward_distance = 8.0; // Distance in meters
+
+    // Calculate the position based on the car's heading
+    grid_map_origin.x = car_state_->x + forward_distance * cos(car_state_->heading);
+    grid_map_origin.y = car_state_->y + forward_distance * sin(car_state_->heading);
+    grid_map_origin.z = car_state_->z; // Same height as car's position
+    grid_map_origin.heading = car_state_->heading;
+
+    int chunk_size = 50; // 20 x 20 meters
     int chunk_radius = chunk_size / 2;
 
     // Convert car state to grid coordinates
-    int car_x_grid = static_cast<int>((car_state_->x - global_map_->info.origin.position.x) / global_map_->info.resolution);
-    int car_y_grid = static_cast<int>((car_state_->y - global_map_->info.origin.position.y) / global_map_->info.resolution);
+    int car_x_grid = static_cast<int>((grid_map_origin.x - global_map_->info.origin.position.x) / global_map_->info.resolution);
+    int car_y_grid = static_cast<int>((grid_map_origin.y - global_map_->info.origin.position.y) / global_map_->info.resolution);
 
     // Define chunk boundaries
     int min_x = std::max(0, car_x_grid - chunk_radius);
