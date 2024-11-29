@@ -1237,7 +1237,7 @@ void local_path_planning_node::yawCarCallback(const std_msgs::msg::Float64::Shar
     // auto duration = std::chrono::duration_cast<std::chrono::milliseconds>(end_time - init_time).count();
     // cout << blue << "Execution time for path creation: " << duration << " ms" << reset << endl;
 
-    // lane_steering_publisher_->publish(lane_maker);
+    lane_steering_publisher_->publish(lane_maker);
 }
 
 void local_path_planning_node::globalMap_callback(const nav_msgs::msg::OccupancyGrid::SharedPtr map)
