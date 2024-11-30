@@ -68,6 +68,8 @@
         "typeinfo": "cpp",
         "variant": "cpp",
         "core": "cpp",
-        "specialfunctions": "cpp"
+        "specialfunctions": "cpp",
+        "strstream": "cpp",
+        "cfenv": "cpp"
     }
 }

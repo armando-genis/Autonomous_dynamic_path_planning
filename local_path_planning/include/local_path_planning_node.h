@@ -7,6 +7,7 @@
 #include <geometry_msgs/msg/point.hpp>
 #include <std_msgs/msg/float64.hpp>
 #include <nav_msgs/msg/occupancy_grid.hpp>
+#include <std_msgs/msg/int32.hpp>
 
 // tf
 #include <tf2_geometry_msgs/tf2_geometry_msgs.hpp>
@@ -122,6 +123,9 @@ private:
     std::shared_ptr<nav_msgs::msg::OccupancyGrid> rescaled_chunk_;
     std::vector<int> skip_ids = {}; // {363, 391};
 
+    // porcentage of the rout
+    double percentage_completed = 0.0;
+
     // tf2 buffer & listener
     tf2_ros::Buffer tf2_buffer;
     tf2_ros::TransformListener tf2_listener;
@@ -166,20 +170,26 @@ private:
     rclcpp::Subscription<obstacles_information_msgs::msg::ObstacleCollection>::SharedPtr obstacle_info_subscription_;
     // subscriber for the yaw angle of the car & publisher for the lane steering
     rclcpp::Subscription<std_msgs::msg::Float64>::SharedPtr yaw_car_sub_;
-    rclcpp::Publisher<visualization_msgs::msg::Marker>::SharedPtr lane_steering_publisher_;
     // subscriber for waypoints
     rclcpp::Subscription<visualization_msgs::msg::MarkerArray>::SharedPtr waypoints_subscription_;
     // subscriber for road elements
     rclcpp::Subscription<traffic_information_msgs::msg::RoadElementsCollection>::SharedPtr road_elements_subscription_;
-    // publisher for the crosswalk markers
-    rclcpp::Publisher<visualization_msgs::msg::MarkerArray>::SharedPtr crosswalk_marker_publisher_;
     // subcriber for the map complete of the hd map (maybe make this in anoter pkg more futher)
     rclcpp::Subscription<nav_msgs::msg::OccupancyGrid>::SharedPtr global_grid_map_sub_;
+    // publisher for the gear type
+    rclcpp::Publisher<std_msgs::msg::Int32>::SharedPtr gear_publisher_;
+    // Publisher for the porcetage
+    rclcpp::Publisher<std_msgs::msg::Int32>::SharedPtr percentage_publisher_;
+
     // publisher for the occupancy grid
     rclcpp::Publisher<nav_msgs::msg::OccupancyGrid>::SharedPtr occupancy_grid_pub_test_;
     // publisher for the path
     rclcpp::Publisher<nav_msgs::msg::Path>::SharedPtr path_publisher_;
-    rclcpp::Publisher<nav_msgs::msg::Path>::SharedPtr path_publisher_real;
+    // rclcpp::Publisher<nav_msgs::msg::Path>::SharedPtr path_publisher_real;
+    // publisher for the car path
+    rclcpp::Publisher<visualization_msgs::msg::MarkerArray>::SharedPtr car_path_pub_;
+    // publisher for the lane steering
+    rclcpp::Publisher<visualization_msgs::msg::Marker>::SharedPtr lane_steering_publisher_;
 
 public:
     local_path_planning_node(/* args */);

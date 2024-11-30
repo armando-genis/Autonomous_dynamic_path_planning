@@ -14,7 +14,7 @@ voxel_grid_filter:
     voxel_condition: true
     roi_max_x_: 10.0
     roi_max_y_: 8.0
-    roi_max_z_: 0.5
+    roi_max_z_: 0.1
     roi_min_x_: -0.5
     roi_min_y_: -8.0
     roi_min_z_: -2.5

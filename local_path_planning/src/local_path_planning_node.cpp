@@ -34,19 +34,27 @@ local_path_planning_node::local_path_planning_node(/* args */) : Node("local_pat
     global_grid_map_sub_ = this->create_subscription<nav_msgs::msg::OccupancyGrid>(
         "/occupancy_grid_complete_map", 10, std::bind(&local_path_planning_node::globalMap_callback, this, std::placeholders::_1));
 
+    // ------------> Publishers <------------
+
     lane_steering_publisher_ = this->create_publisher<visualization_msgs::msg::Marker>(
         "steering_lane", 10);
-
-    crosswalk_marker_publisher_ = this->create_publisher<visualization_msgs::msg::MarkerArray>(
-        "crosswalk_markers", 10);
 
     occupancy_grid_pub_test_ = this->create_publisher<nav_msgs::msg::OccupancyGrid>(
         "/occupancy_grid_obstacles", 10);
 
     path_publisher_ = this->create_publisher<nav_msgs::msg::Path>("path_waypoints", 10);
 
-    path_publisher_real = this->create_publisher<nav_msgs::msg::Path>("path_waypoints_real", 10);
+    // path_publisher_real = this->create_publisher<nav_msgs::msg::Path>("path_waypoints_real", 10);
 
+    gear_publisher_ = this->create_publisher<std_msgs::msg::Int32>("/gear_selection", rclcpp::SystemDefaultsQoS());
+
+    percentage_publisher_ = this->create_publisher<std_msgs::msg::Int32>("/percentage", rclcpp::SystemDefaultsQoS());
+
+    // -------------> Publishers for path  <------------
+
+    car_path_pub_ = this->create_publisher<visualization_msgs::msg::MarkerArray>("/car_path", 10);
+
+    // -------------> Initialize the shared pointers  <------------
     vehicle_path = std::make_shared<geometry_msgs::msg::Polygon>();
     segment_path = std::make_shared<geometry_msgs::msg::Polygon>();
     collision_vector = std::make_shared<std::vector<bool>>();
@@ -241,7 +249,7 @@ void local_path_planning_node::compute_path_polygon()
 
     segment_path->points.push_back(segment_path->points.front());
     lane_maker.points.push_back(lane_maker.points.front());
-    lane_steering_publisher_->publish(lane_maker);
+    // lane_steering_publisher_->publish(lane_maker);
 }
 
 double
@@ -269,10 +277,6 @@ void local_path_planning_node::sampleLayersAlongPath()
         std::cout << red << "Warning: combined map is not available. Skipping polygon path creation." << reset << std::endl;
         return;
     }
-
-    // MarkerArray to hold all markers
-    visualization_msgs::msg::MarkerArray marker_array;
-    int marker_id = 0;
 
     grid_map_ = std::make_shared<Grid_map>(*rescaled_chunk_);
     grid_map_->setcarData(car_data_);
@@ -354,7 +358,7 @@ void local_path_planning_node::sampleLayersAlongPath()
             CurrentState_.y = sample_point(1);
             CurrentState_.heading = sample_point(2);
 
-            double obstacle_distance = grid_map_->getObstacleDistance(pos);
+            // double obstacle_distance = grid_map_->getObstacleDistance(pos);
             bool collision = grid_map_->isSingleStateCollisionFreeImproved(CurrentState_);
 
             // if (obstacle_distance > search_threshold)
@@ -388,27 +392,6 @@ void local_path_planning_node::sampleLayersAlongPath()
 
                 layer_costs.push_back(min_cost);
                 layer_predecessors.push_back(best_predecessor);
-
-                // Create a marker for this point
-                visualization_msgs::msg::Marker marker;
-                marker.header.frame_id = "map"; // Set appropriate frame ID
-                marker.header.stamp = rclcpp::Clock().now();
-                marker.ns = "sampled_points";
-                marker.id = marker_id++;
-                marker.type = visualization_msgs::msg::Marker::SPHERE;
-                marker.action = visualization_msgs::msg::Marker::ADD;
-                marker.pose.position.x = sample_point(0);
-                marker.pose.position.y = sample_point(1);
-                marker.pose.position.z = 0.0; // Adjust if needed
-                marker.scale.x = 0.4;         // Diameter of the sphere
-                marker.scale.y = 0.4;
-                marker.scale.z = 0.4;
-                marker.color.a = 1.0; // Alpha (1.0 is fully opaque)
-                marker.color.r = 0.0; // Customize color as desired
-                marker.color.g = 1.0;
-                marker.color.b = 0.0;
-                marker.lifetime = rclcpp::Duration(0, 0); // Persistent markers
-                marker_array.markers.push_back(marker);
             }
         }
 
@@ -438,7 +421,6 @@ void local_path_planning_node::sampleLayersAlongPath()
 
     // cout the layer points count
     std::cout << green << "---> Layer points count: " << layer_points_count << reset << std::endl;
-    std::cout << green << "--->Markers size: " << marker_array.markers.size() << reset << std::endl;
 
     // ========================================================================================================
 
@@ -473,32 +455,6 @@ void local_path_planning_node::sampleLayersAlongPath()
 
     // cout the size of the optimal path
     cout << yellow << "---> Optimal path size: " << optimal_path->size() << reset << endl;
-    // Publish add the optimal path to the marker array
-    for (size_t i = 0; i < optimal_path->size(); ++i)
-    {
-        visualization_msgs::msg::Marker marker;
-        marker.header.frame_id = "map"; // Set appropriate frame ID
-        marker.header.stamp = rclcpp::Clock().now();
-        marker.ns = "optimal_path";
-        marker.id = marker_id++;
-        marker.type = visualization_msgs::msg::Marker::SPHERE;
-        marker.action = visualization_msgs::msg::Marker::ADD;
-        marker.pose.position.x = optimal_path->at(i)(0);
-        marker.pose.position.y = optimal_path->at(i)(1);
-        marker.pose.position.z = 0.0; // Adjust if needed
-        marker.scale.x = 0.5;         // Diameter of the sphere
-        marker.scale.y = 0.5;
-        marker.scale.z = 0.5;
-        marker.color.a = 1.0; // Alpha (1.0 is fully opaque)
-        marker.color.r = 1.0; // Customize color as desired
-        marker.color.g = 0.0;
-        marker.color.b = 0.0;
-        marker.lifetime = rclcpp::Duration(0, 0); // Persistent markers
-        marker_array.markers.push_back(marker);
-    }
-
-    // Publish markers for the sampled points
-    crosswalk_marker_publisher_->publish(marker_array);
 
     // Compute the split path from the optimal path
     computeSplitpath();
@@ -581,6 +537,14 @@ void local_path_planning_node::computeSplitpath()
 
     std::cout << yellow << "---> Path published." << reset << std::endl;
 
+    // check if the distance btw the fist waypoint of result and the car (car_state_) is less than 1m is not return
+    double distance = sqrt(pow(result[0] - car_state_->x, 2) + pow(result[1] - car_state_->y, 2));
+    if (distance > 4)
+    {
+        std::cout << red << "---> Distance between the car and the first waypoint of the path is greater than 1m." << reset << std::endl;
+        return;
+    }
+
     // ========================================================================================================
     // check collision with the interpolated path to create a real path
     // ========================================================================================================
@@ -621,26 +585,101 @@ void local_path_planning_node::computeSplitpath()
     }
 
     // Publish the path until the collision
-    nav_msgs::msg::Path path_msg_real;
-    path_msg_real.header.frame_id = "map";
-    path_msg_real.header.stamp = rclcpp::Clock().now();
+    // nav_msgs::msg::Path path_msg_real;
+    // path_msg_real.header.frame_id = "map";
+    // path_msg_real.header.stamp = rclcpp::Clock().now();
 
-    for (size_t i = 0; i <= index_to_collision; i += 2)
+    // Prepare the MarkerArray for visualization for the path
+    visualization_msgs::msg::MarkerArray marker_array_next;
+    int id = 4000;
+
+    size_t total_states = result.size() / 2;
+
+    for (size_t i = 0; i + 3 <= index_to_collision; i += 2)
     {
         if (i + 1 >= result.size())
             break; // Prevent out-of-bounds access
 
-        geometry_msgs::msg::PoseStamped pose;
-        pose.pose.position.x = result[i];     // x-coordinate
-        pose.pose.position.y = result[i + 1]; // y-coordinate
-        pose.pose.position.z = 0.0;           // Adjust if needed
-        path_msg_real.poses.push_back(pose);
+        double x1 = result[i];
+        double y1 = result[i + 1];
+
+        double x2 = result[i + 2];
+        double y2 = result[i + 3];
+
+        // Compute the yaw angle
+        double yaw = atan2(y2 - y1, x2 - x1);
+
+        // Create the CUBE marker for the car polygon
+        visualization_msgs::msg::Marker car_polygon_marker;
+        car_polygon_marker.header.frame_id = "map";
+        car_polygon_marker.header.stamp = this->now();
+        car_polygon_marker.ns = "next_state_polygons";
+        car_polygon_marker.action = visualization_msgs::msg::Marker::ADD;
+        car_polygon_marker.id = id++;
+        car_polygon_marker.type = visualization_msgs::msg::Marker::CUBE;
+
+        // Set the size of the CUBE
+        car_polygon_marker.scale.x = car_data_.axleToFront + car_data_.axleToBack; // Length of the car
+        car_polygon_marker.scale.y = car_data_.width;                              // Width of the car
+        car_polygon_marker.scale.z = 0.1;                                          // Height of the CUBE
+
+        // Calculate interpolation factor (0.0 to 1.0) for color transition
+        double t = (total_states > 1) ? static_cast<double>(i) / (total_states - 1) : 1.0;
+
+        // Initialize RGB values for Yellow -> Green -> Blue transition
+        double r = 0.0, g = 1.0, b = 0.0;
+        if (t < 0.5)
+        {
+            // Yellow to Green transition (first half)
+            double yellow_to_green_factor = t / 0.5;
+            r = 1.0 - yellow_to_green_factor;
+            g = 1.0;
+            b = 0.0;
+        }
+        else
+        {
+            // Green to Blue transition (second half)
+            double green_to_blue_factor = (t - 0.5) / 0.5;
+            r = 0.0;
+            g = 1.0 - green_to_blue_factor;
+            b = green_to_blue_factor;
+        }
+
+        car_polygon_marker.color.r = r;
+        car_polygon_marker.color.g = g;
+        car_polygon_marker.color.b = b;
+        car_polygon_marker.color.a = 0.5;
+
+        // Set the pose of the CUBE
+        car_polygon_marker.pose.position.x = result[i];
+        car_polygon_marker.pose.position.y = result[i + 1];
+        car_polygon_marker.pose.position.z = car_state_->z + 0.15; // Adjust if needed
+
+        // Convert heading (yaw) to quaternion for marker orientation
+        tf2::Quaternion quat;
+        quat.setRPY(0.0, 0.0, yaw);
+        car_polygon_marker.pose.orientation.x = quat.x();
+        car_polygon_marker.pose.orientation.y = quat.y();
+        car_polygon_marker.pose.orientation.z = quat.z();
+        car_polygon_marker.pose.orientation.w = quat.w();
+
+        // Add the marker to the array
+        marker_array_next.markers.push_back(car_polygon_marker);
+
+        // geometry_msgs::msg::PoseStamped pose;
+        // pose.pose.position.x = x1;            // x-coordinate
+        // pose.pose.position.y = y1;            // y-coordinate
+        // pose.pose.position.z = car_state_->z; // Adjust if needed
+        // path_msg_real.poses.push_back(pose);
     }
 
     // Publish the interpolated path
-    path_publisher_real->publish(path_msg_real);
+    // path_publisher_real->publish(path_msg_real);
+    car_path_pub_->publish(marker_array_next);
 
     std::cout << yellow << "---> Index to collision: <---" << index_to_collision << reset << std::endl;
+
+    marker_array_next.markers.clear();
 }
 
 double local_path_planning_node::computeCost(const Eigen::VectorXd &point, const Eigen::VectorXd &prev_point, int layer_idx)
@@ -649,7 +688,7 @@ double local_path_planning_node::computeCost(const Eigen::VectorXd &point, const
     Eigen::Vector2d pos(point(0), point(1));
     double obstacle_cost = 0.0;
     double obstacle_distance = grid_map_->getObstacleDistance(pos);
-    double safety_distance = 6.0;
+    double safety_distance = 5.0;
 
     if (obstacle_distance < safety_distance)
     {
@@ -903,7 +942,11 @@ void local_path_planning_node::map_combination(const obstacles_information_msgs:
         }
     }
 
-    occupancy_grid_pub_test_->publish(*rescaled_chunk_);
+    // Publish the rescaled chunk
+    if (occupancy_grid_pub_test_->get_subscription_count() > 0)
+    {
+        occupancy_grid_pub_test_->publish(*rescaled_chunk_);
+    }
 }
 
 // ============================== Main Function for map rescale ==============================
@@ -1021,6 +1064,16 @@ void local_path_planning_node::roadElementsCallback(const traffic_information_ms
 
     waypoints_segmentation->clear();
 
+    // calculate the percentage of the waypoints
+    size_t total_waypoints = waypoints->size();
+    percentage_completed = (static_cast<double>(closest_waypoint) / static_cast<double>(total_waypoints)) * 100.0;
+    // Create a message object
+    std_msgs::msg::Int32 percentage_msg;
+    percentage_msg.data = static_cast<int>(percentage_completed); // Set the data field
+
+    // Publish the message
+    percentage_publisher_->publish(percentage_msg);
+
     traffic_information_msgs::msg::RoadElements first_crosswalk;
     bool found_first_crosswalk = false;
 
@@ -1096,7 +1149,7 @@ void local_path_planning_node::roadElementsCallback(const traffic_information_ms
 
     // check if the crosswalk has been visited
     crosswalk_visited_check(first_crosswalk);
-    compute_path_polygon();
+    // compute_path_polygon();
 
     // Output the ID of the nearest crosswalk
     // cout << "First crosswalk id: " << first_crosswalk.id << endl;
@@ -1120,6 +1173,10 @@ void local_path_planning_node::obstacle_info_callback(const obstacles_informatio
 
     collision_vector->clear();
 
+    // geat type
+    auto message = std_msgs::msg::Int32();
+    message.data = 2;
+
     collision_detected_trajectory = false;
     collision_detected_path = false;
     for (const auto &obstacle : msg->obstacles)
@@ -1129,11 +1186,13 @@ void local_path_planning_node::obstacle_info_callback(const obstacles_informatio
         if (current_collision)
         {
             collision_detected_trajectory = true;
+            message.data = 0;
         }
     }
 
     // std::cout << green << "---> Collision detected trajectory: " << collision_detected_trajectory << reset << std::endl;
 
+    gear_publisher_->publish(message);
     map_combination(msg);
     sampleLayersAlongPath();
 
@@ -1237,7 +1296,10 @@ void local_path_planning_node::yawCarCallback(const std_msgs::msg::Float64::Shar
     // auto duration = std::chrono::duration_cast<std::chrono::milliseconds>(end_time - init_time).count();
     // cout << blue << "Execution time for path creation: " << duration << " ms" << reset << endl;
 
-    lane_steering_publisher_->publish(lane_maker);
+    if (lane_steering_publisher_->get_subscription_count() > 0)
+    {
+        lane_steering_publisher_->publish(lane_maker);
+    }
 }
 
 void local_path_planning_node::globalMap_callback(const nav_msgs::msg::OccupancyGrid::SharedPtr map)
