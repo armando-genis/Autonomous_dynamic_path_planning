@@ -11,25 +11,6 @@ def generate_launch_description():
 
     paramsConfig = os.path.join(get_package_share_directory('global_dynamic_launcher'),'config','rio_voxel_ground.yaml')
 
-
-    publisher_node_ground_lidar = launch_ros.actions.Node(
-        package='lidar_ground_getter',
-        executable='lidar_ground_node',
-        name='lidar_ground_node',
-        parameters=[paramsConfig],
-        additional_env={'RCUTILS_CONSOLE_OUTPUT_FORMAT': "{message}"},
-        output='screen'
-    )
-
-    publisher_node_riovoxel_lidar = launch_ros.actions.Node(
-        package='voxel_grid_filter',
-        executable='voxel_grid_filter',
-        name='voxel_grid_filter',
-        parameters=[paramsConfig],
-        additional_env={'RCUTILS_CONSOLE_OUTPUT_FORMAT': "{message}"},
-        output='screen'
-    )
-
     publisher_node_pointcloud_clustering_node = launch_ros.actions.Node(
         package='pointcloud_clustering',
         executable='pointcloud_clustering_node',
@@ -38,9 +19,16 @@ def generate_launch_description():
         output='screen',
         parameters=[paramsConfig]
     )
+
+    velocity_pub_node = launch_ros.actions.Node(
+        package='velocity_pub',
+        executable='velocity_publisher',
+        name='velocity_publisher',
+        additional_env={'RCUTILS_CONSOLE_OUTPUT_FORMAT': "{message}"},
+        output='screen'
+    )
     
     return launch.LaunchDescription([
-        publisher_node_ground_lidar,
-        publisher_node_riovoxel_lidar,
-        publisher_node_pointcloud_clustering_node
+        publisher_node_pointcloud_clustering_node,
+        velocity_pub_node
     ])

@@ -182,7 +182,7 @@ private:
     rclcpp::Publisher<std_msgs::msg::Int32>::SharedPtr percentage_publisher_;
 
     // publisher for the occupancy grid
-    rclcpp::Publisher<nav_msgs::msg::OccupancyGrid>::SharedPtr occupancy_grid_pub_test_;
+    // rclcpp::Publisher<nav_msgs::msg::OccupancyGrid>::SharedPtr occupancy_grid_pub_test_;
     // publisher for the path
     rclcpp::Publisher<nav_msgs::msg::Path>::SharedPtr path_publisher_;
     // rclcpp::Publisher<nav_msgs::msg::Path>::SharedPtr path_publisher_real;

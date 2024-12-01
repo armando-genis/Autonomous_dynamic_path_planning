@@ -26,7 +26,7 @@ local_path_planning_node::local_path_planning_node(/* args */) : Node("local_pat
         "/road_elements", 10, std::bind(&local_path_planning_node::roadElementsCallback, this, std::placeholders::_1));
 
     yaw_car_sub_ = this->create_subscription<std_msgs::msg::Float64>(
-        "/yaw_car", 10, std::bind(&local_path_planning_node::yawCarCallback, this, std::placeholders::_1));
+        "/sdv/steering/position", 10, std::bind(&local_path_planning_node::yawCarCallback, this, std::placeholders::_1));
 
     waypoints_subscription_ = this->create_subscription<visualization_msgs::msg::MarkerArray>(
         "/waypoints_routing", 10, std::bind(&local_path_planning_node::waypoints_callback, this, std::placeholders::_1));
@@ -39,12 +39,12 @@ local_path_planning_node::local_path_planning_node(/* args */) : Node("local_pat
     lane_steering_publisher_ = this->create_publisher<visualization_msgs::msg::Marker>(
         "steering_lane", 10);
 
-    occupancy_grid_pub_test_ = this->create_publisher<nav_msgs::msg::OccupancyGrid>(
-        "/occupancy_grid_obstacles", 10);
+    // occupancy_grid_pub_test_ = this->create_publisher<nav_msgs::msg::OccupancyGrid>(
+    //     "/occupancy_grid_obstacles", 10);
 
     path_publisher_ = this->create_publisher<nav_msgs::msg::Path>("path_waypoints", 10);
 
-    // path_publisher_real = this->create_publisher<nav_msgs::msg::Path>("path_waypoints_real", 10);
+    // path_publisher_real = this->create_publisher<nav_msgs::msg::Path>("path_to_follow", 10);
 
     gear_publisher_ = this->create_publisher<std_msgs::msg::Int32>("/gear_selection", rclcpp::SystemDefaultsQoS());
 
@@ -409,18 +409,18 @@ void local_path_planning_node::sampleLayersAlongPath()
     // debug
 
     // cout waypoints_segmentation size
-    std::cout << green << "waypoints_segmentation size: " << waypoints_segmentation->size() << reset << std::endl;
-    std::cout << green << "---> Number of layers: " << layers_samples.size() << reset << std::endl;
+    // std::cout << green << "waypoints_segmentation size: " << waypoints_segmentation->size() << reset << std::endl;
+    // std::cout << green << "---> Number of layers: " << layers_samples.size() << reset << std::endl;
 
-    // add the points of the layers sample and cout out them
-    int layer_points_count = 0;
-    for (const auto &layer : layers_samples)
-    {
-        layer_points_count += layer.size();
-    }
+    // // add the points of the layers sample and cout out them
+    // int layer_points_count = 0;
+    // for (const auto &layer : layers_samples)
+    // {
+    //     layer_points_count += layer.size();
+    // }
 
-    // cout the layer points count
-    std::cout << green << "---> Layer points count: " << layer_points_count << reset << std::endl;
+    // // cout the layer points count
+    // std::cout << green << "---> Layer points count: " << layer_points_count << reset << std::endl;
 
     // ========================================================================================================
 
@@ -452,9 +452,6 @@ void local_path_planning_node::sampleLayersAlongPath()
 
         std::reverse(optimal_path->begin(), optimal_path->end());
     }
-
-    // cout the size of the optimal path
-    cout << yellow << "---> Optimal path size: " << optimal_path->size() << reset << endl;
 
     // Compute the split path from the optimal path
     computeSplitpath();
@@ -515,33 +512,19 @@ void local_path_planning_node::computeSplitpath()
     const size_t num_samples = 100; // Adjust this value as needed for resolution
     std::vector<tinyspline::real> result = spline.sample(num_samples);
 
-    cout << yellow << "---> Interpolated path size: " << result.size() / 2 << reset << endl;
-
-    // Prepare the Path message
-    nav_msgs::msg::Path path_msg;     // Fix: Corrected type to nav_msgs::msg::Path
-    path_msg.header.frame_id = "map"; // Adjust to your specific frame
-    path_msg.header.stamp = rclcpp::Clock().now();
-
-    // Extract the sampled points and add them to the path message
-    for (size_t i = 0; i < result.size(); i += 2)
-    {
-        geometry_msgs::msg::PoseStamped pose;
-        pose.pose.position.x = result[i];     // x-coordinate
-        pose.pose.position.y = result[i + 1]; // y-coordinate
-        pose.pose.position.z = 0.0;           // Adjust if needed
-        path_msg.poses.push_back(pose);
-    }
-
-    // Publish the interpolated path
-    path_publisher_->publish(path_msg);
-
-    std::cout << yellow << "---> Path published." << reset << std::endl;
+    // cout << yellow << "---> Interpolated path size: " << result.size() / 2 << reset << endl;
 
     // check if the distance btw the fist waypoint of result and the car (car_state_) is less than 1m is not return
     double distance = sqrt(pow(result[0] - car_state_->x, 2) + pow(result[1] - car_state_->y, 2));
     if (distance > 4)
     {
         std::cout << red << "---> Distance between the car and the first waypoint of the path is greater than 1m." << reset << std::endl;
+        return;
+    }
+
+    if (collision_detected_trajectory)
+    {
+        std::cout << red << "---> obstacle near the car. Skipt creating a path" << reset << std::endl;
         return;
     }
 
@@ -584,13 +567,31 @@ void local_path_planning_node::computeSplitpath()
         }
     }
 
-    // Publish the path until the collision
-    // nav_msgs::msg::Path path_msg_real;
-    // path_msg_real.header.frame_id = "map";
-    // path_msg_real.header.stamp = rclcpp::Clock().now();
+    // Prepare the Path message
+    nav_msgs::msg::Path path_msg;     // Fix: Corrected type to nav_msgs::msg::Path
+    path_msg.header.frame_id = "map"; // Adjust to your specific frame
+    path_msg.header.stamp = rclcpp::Clock().now();
+
+    // Extract the sampled points and add them to the path message
+    for (size_t i = 0; i + 3 <= index_to_collision; i += 2)
+    {
+        geometry_msgs::msg::PoseStamped pose;
+        pose.pose.position.x = result[i];     // x-coordinate
+        pose.pose.position.y = result[i + 1]; // y-coordinate
+        pose.pose.position.z = 0.0;           // Adjust if needed
+        path_msg.poses.push_back(pose);
+    }
+
+    // Publish the interpolated path
+    path_publisher_->publish(path_msg);
+
+    std::cout << yellow << "---> Path published." << reset << std::endl;
+
+    static std::set<int> previous_marker_ids;
 
     // Prepare the MarkerArray for visualization for the path
     visualization_msgs::msg::MarkerArray marker_array_next;
+    std::set<int> current_marker_ids; // To track markers used in this update
     int id = 4000;
 
     size_t total_states = result.size() / 2;
@@ -617,6 +618,9 @@ void local_path_planning_node::computeSplitpath()
         car_polygon_marker.action = visualization_msgs::msg::Marker::ADD;
         car_polygon_marker.id = id++;
         car_polygon_marker.type = visualization_msgs::msg::Marker::CUBE;
+
+        // Track the marker ID for this update
+        current_marker_ids.insert(car_polygon_marker.id);
 
         // Set the size of the CUBE
         car_polygon_marker.scale.x = car_data_.axleToFront + car_data_.axleToBack; // Length of the car
@@ -653,7 +657,7 @@ void local_path_planning_node::computeSplitpath()
         // Set the pose of the CUBE
         car_polygon_marker.pose.position.x = result[i];
         car_polygon_marker.pose.position.y = result[i + 1];
-        car_polygon_marker.pose.position.z = car_state_->z + 0.15; // Adjust if needed
+        car_polygon_marker.pose.position.z = car_state_->z; // Adjust if needed
 
         // Convert heading (yaw) to quaternion for marker orientation
         tf2::Quaternion quat;
@@ -665,20 +669,31 @@ void local_path_planning_node::computeSplitpath()
 
         // Add the marker to the array
         marker_array_next.markers.push_back(car_polygon_marker);
-
-        // geometry_msgs::msg::PoseStamped pose;
-        // pose.pose.position.x = x1;            // x-coordinate
-        // pose.pose.position.y = y1;            // y-coordinate
-        // pose.pose.position.z = car_state_->z; // Adjust if needed
-        // path_msg_real.poses.push_back(pose);
     }
 
-    // Publish the interpolated path
-    // path_publisher_real->publish(path_msg_real);
+    // Identify and delete unused markers
+    for (int previous_id : previous_marker_ids)
+    {
+        if (current_marker_ids.find(previous_id) == current_marker_ids.end())
+        {
+            visualization_msgs::msg::Marker delete_marker;
+            delete_marker.header.frame_id = "map";
+            delete_marker.header.stamp = this->now();
+            delete_marker.ns = "next_state_polygons";
+            delete_marker.id = previous_id;
+            delete_marker.action = visualization_msgs::msg::Marker::DELETE;
+
+            marker_array_next.markers.push_back(delete_marker);
+        }
+    }
+
+    // Update the set of previous marker IDs
+    previous_marker_ids = current_marker_ids;
+
+    // Publish the MarkerArray
     car_path_pub_->publish(marker_array_next);
 
-    std::cout << yellow << "---> Index to collision: <---" << index_to_collision << reset << std::endl;
-
+    // Clear markers for reuse
     marker_array_next.markers.clear();
 }
 
@@ -943,10 +958,10 @@ void local_path_planning_node::map_combination(const obstacles_information_msgs:
     }
 
     // Publish the rescaled chunk
-    if (occupancy_grid_pub_test_->get_subscription_count() > 0)
-    {
-        occupancy_grid_pub_test_->publish(*rescaled_chunk_);
-    }
+    // if (occupancy_grid_pub_test_->get_subscription_count() > 0)
+    // {
+    //     occupancy_grid_pub_test_->publish(*rescaled_chunk_);
+    // }
 }
 
 // ============================== Main Function for map rescale ==============================
@@ -1213,8 +1228,11 @@ void local_path_planning_node::yawCarCallback(const std_msgs::msg::Float64::Shar
 
     vehicle_path->points.clear();
 
+    // Example: limiting yaw angle to 2 decimal places
+    double rounded_yaw = std::round(msg->data * 100.0) / 100.0;
+
     // Calculate the trajectory of the car in base of the yaw angle
-    vector<pair<double, double>> trajectory = calculate_trajectory(msg->data, turning_radius, num_points);
+    vector<pair<double, double>> trajectory = calculate_trajectory(rounded_yaw, turning_radius, num_points);
 
     // extract the segment of the trajectory
     std::vector<double> segment_x, segment_y;
@@ -1247,6 +1265,11 @@ void local_path_planning_node::yawCarCallback(const std_msgs::msg::Float64::Shar
         lane_maker.color.b = 0.0;
     }
 
+    // Use car_state_ for transformations
+    double car_x = car_state_->x;
+    double car_y = car_state_->y;
+    double car_heading = car_state_->heading;
+
     // Publish lane with the track of the car for the left side
     for (size_t i = 0; i < segment_x.size(); ++i)
     {
@@ -1254,16 +1277,24 @@ void local_path_planning_node::yawCarCallback(const std_msgs::msg::Float64::Shar
         double offset_x = track_car * cos(angle + M_PI / 2);
         double offset_y = track_car * sin(angle + M_PI / 2);
 
+        // Calculate point in the car's local frame
+        double local_x = segment_x[i] + offset_x;
+        double local_y = segment_y[i] + offset_y;
+
+        // Transform to map frame using car state
+        double global_x = car_x + (local_x * cos(car_heading) - local_y * sin(car_heading));
+        double global_y = car_y + (local_x * sin(car_heading) + local_y * cos(car_heading));
+
         geometry_msgs::msg::Point32 converted_point;
-        converted_point.x = segment_x[i] + offset_x;
-        converted_point.y = segment_y[i] + offset_y;
+        converted_point.x = local_x;
+        converted_point.y = local_y;
         converted_point.z = 0.0;
         vehicle_path->points.push_back(converted_point);
 
         geometry_msgs::msg::Point left_point;
-        left_point.x = converted_point.x;
-        left_point.y = converted_point.y;
-        left_point.z = 0.0;
+        left_point.x = global_x;
+        left_point.y = global_y;
+        left_point.z = car_state_->z;
         lane_maker.points.push_back(left_point);
     }
 
@@ -1275,16 +1306,24 @@ void local_path_planning_node::yawCarCallback(const std_msgs::msg::Float64::Shar
         double offset_x = track_car * cos(angle + M_PI / 2);
         double offset_y = track_car * sin(angle + M_PI / 2);
 
+        // Calculate point in the car's local frame
+        double local_x = segment_x[i] - offset_x;
+        double local_y = segment_y[i] - offset_y;
+
+        // Transform to map frame using car state
+        double global_x = car_x + (local_x * cos(car_heading) - local_y * sin(car_heading));
+        double global_y = car_y + (local_x * sin(car_heading) + local_y * cos(car_heading));
+
         geometry_msgs::msg::Point32 converted_point;
-        converted_point.x = segment_x[i] - offset_x;
-        converted_point.y = segment_y[i] - offset_y;
+        converted_point.x = local_x;
+        converted_point.y = local_y;
         converted_point.z = 0.0;
         vehicle_path->points.push_back(converted_point);
 
         geometry_msgs::msg::Point right_point;
-        right_point.x = converted_point.x;
-        right_point.y = converted_point.y;
-        right_point.z = 0.0;
+        right_point.x = global_x;
+        right_point.y = global_y;
+        right_point.z = car_state_->z;
         lane_maker.points.push_back(right_point);
     }
 
