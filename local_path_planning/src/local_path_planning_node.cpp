@@ -140,7 +140,7 @@ void local_path_planning_node::crosswalk_visited_check(const traffic_information
 
     // Check for collision only if the crosswalk is near the the car (e.g., within 3 meters)
     // if (std::abs(crosswalk.points[0].x - car_state_->x) < 5 && std::abs(crosswalk.points[0].y - car_state_->y) < 5)
-    if (std::abs(center_x - car_state_->x) < 5 && std::abs(center_y - car_state_->y) < 5)
+    if (std::abs(center_x - car_state_->x) < 3 && std::abs(center_y - car_state_->y) < 3)
     {
         // append the element id to the list of visited crosswalks
         skip_ids.push_back(crosswalk.id);
@@ -1240,7 +1240,7 @@ void local_path_planning_node::yawCarCallback(const std_msgs::msg::Float64::Shar
 
     // Prepare Marker for visualization
     visualization_msgs::msg::Marker lane_maker;
-    lane_maker.header.frame_id = "velodyne";
+    lane_maker.header.frame_id = "map";
     lane_maker.header.stamp = this->now();
 
     lane_maker.ns = "vehicle_path";
