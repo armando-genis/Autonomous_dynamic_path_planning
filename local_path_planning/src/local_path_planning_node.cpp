@@ -1111,8 +1111,10 @@ void local_path_planning_node::roadElementsCallback(const traffic_information_ms
         double x = waypoint(0);
         double y = waypoint(1);
 
+        size_t segment_start_index_3more = std::min(static_cast<size_t>(segment_start_index + 3), waypoints->size() - 1);
+
         // push bach of the waypoints are btw segment_start_index_temp and segment_start_index
-        if (i >= segment_start_index_temp && i <= segment_start_index)
+        if (i >= segment_start_index_temp && i <= segment_start_index_3more)
         {
             waypoints_segmentation->push_back(waypoint);
         }
