@@ -8,6 +8,7 @@
 #include <std_msgs/msg/float64.hpp>
 #include <nav_msgs/msg/occupancy_grid.hpp>
 #include <std_msgs/msg/int32.hpp>
+#include <std_msgs/msg/bool.hpp>
 
 // tf
 #include <tf2_geometry_msgs/tf2_geometry_msgs.hpp>
@@ -190,6 +191,9 @@ private:
     rclcpp::Publisher<visualization_msgs::msg::MarkerArray>::SharedPtr car_path_pub_;
     // publisher for the lane steering
     rclcpp::Publisher<visualization_msgs::msg::Marker>::SharedPtr lane_steering_publisher_;
+
+    // publisher bool for emergency stop
+    rclcpp::Publisher<std_msgs::msg::Bool>::SharedPtr emergency_stop_publisher_;
 
 public:
     local_path_planning_node(/* args */);

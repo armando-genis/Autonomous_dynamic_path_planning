@@ -54,6 +54,8 @@ local_path_planning_node::local_path_planning_node(/* args */) : Node("local_pat
 
     car_path_pub_ = this->create_publisher<visualization_msgs::msg::MarkerArray>("/car_path", 10);
 
+    emergency_stop_publisher_ = this->create_publisher<std_msgs::msg::Bool>("/sdv/emergency_stop", 10);
+
     // -------------> Initialize the shared pointers  <------------
     vehicle_path = std::make_shared<geometry_msgs::msg::Polygon>();
     segment_path = std::make_shared<geometry_msgs::msg::Polygon>();
@@ -409,8 +411,8 @@ void local_path_planning_node::sampleLayersAlongPath()
     // debug
 
     // cout waypoints_segmentation size
-    // std::cout << green << "waypoints_segmentation size: " << waypoints_segmentation->size() << reset << std::endl;
-    // std::cout << green << "---> Number of layers: " << layers_samples.size() << reset << std::endl;
+    std::cout << green << "waypoints_segmentation size: " << waypoints_segmentation->size() << reset << std::endl;
+    std::cout << green << "---> Number of layers: " << layers_samples.size() << reset << std::endl;
 
     // // add the points of the layers sample and cout out them
     // int layer_points_count = 0;
@@ -525,6 +527,14 @@ void local_path_planning_node::computeSplitpath()
     if (collision_detected_trajectory)
     {
         std::cout << red << "---> obstacle near the car. Skipt creating a path" << reset << std::endl;
+        return;
+    }
+
+    // check ifthe distance btw the last waypoint of result and the car (car_state_) is less than 4m is return, because the path is to short
+    distance = sqrt(pow(result[result.size() - 2] - car_state_->x, 2) + pow(result[result.size() - 1] - car_state_->y, 2));
+    if (distance < 3)
+    {
+        std::cout << red << "---> Distance between the car and the last waypoint of the path is less than 4m." << reset << std::endl;
         return;
     }
 
@@ -1212,6 +1222,11 @@ void local_path_planning_node::obstacle_info_callback(const obstacles_informatio
     gear_publisher_->publish(message);
     map_combination(msg);
     sampleLayersAlongPath();
+
+    // bool msgs
+    auto collision_message = std_msgs::msg::Bool();
+    collision_message.data = collision_detected_trajectory;
+    emergency_stop_publisher_->publish(collision_message);
 
     // if (collision_detected_trajectory)
     // {
