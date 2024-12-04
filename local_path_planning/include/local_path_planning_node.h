@@ -91,6 +91,7 @@ private:
     bool collision_detected_path = false;
     int segment_start_index = 0;
     int segment_start_index_temp = 0;
+    int segment_start_index_3more = 0;
     int closest_waypoint = 0;
 
     // variables for the path prossecing
@@ -104,6 +105,9 @@ private:
     double FLAGS_curvature_weight = 1.0;      // Penalty for sharp turns to promote smooth paths
     double FLAGS_proximity_weight = 2.7;      // Keeps path near reference unless obstacles force deviation
     double FLAGS_persistence_weight = 0.5;
+
+    // obstacle bool
+    bool mode_obstacle = 1;
 
     // Grid Map
     std::shared_ptr<Grid_map> grid_map_;
@@ -183,7 +187,7 @@ private:
     rclcpp::Publisher<std_msgs::msg::Int32>::SharedPtr percentage_publisher_;
 
     // publisher for the occupancy grid
-    // rclcpp::Publisher<nav_msgs::msg::OccupancyGrid>::SharedPtr occupancy_grid_pub_test_;
+    rclcpp::Publisher<nav_msgs::msg::OccupancyGrid>::SharedPtr occupancy_grid_pub_test_;
     // publisher for the path
     rclcpp::Publisher<nav_msgs::msg::Path>::SharedPtr path_publisher_;
     // rclcpp::Publisher<nav_msgs::msg::Path>::SharedPtr path_publisher_real;
@@ -194,6 +198,8 @@ private:
 
     // publisher bool for emergency stop
     rclcpp::Publisher<std_msgs::msg::Bool>::SharedPtr emergency_stop_publisher_;
+
+    // rclcpp::Publisher<visualization_msgs::msg::MarkerArray>::SharedPtr crosswalk_marker_publisher_;
 
 public:
     local_path_planning_node(/* args */);
