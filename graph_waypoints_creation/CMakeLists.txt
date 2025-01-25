@@ -19,9 +19,40 @@ find_package(Eigen3 REQUIRED)
 
 add_executable(graph_waypoints_creation src/graph_waypoints_creation.cpp)
 
+# Link the executable with the libraries
+ament_target_dependencies(graph_waypoints_creation 
+                          rclcpp 
+                          geometry_msgs 
+                          std_msgs 
+                          visualization_msgs 
+                          nav_msgs 
+                          tf2 
+                          tf2_ros 
+                          tf2_geometry_msgs 
+                          Eigen3)
+
+target_include_directories(graph_waypoints_creation PUBLIC
+  $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
+  $<INSTALL_INTERFACE:include>
+)
+
+# Install targets
+install(TARGETS
+  graph_waypoints_creation
+  DESTINATION lib/${PROJECT_NAME}
+)
+
+target_link_libraries(graph_waypoints_creation
+  Eigen3::Eigen
+)
+
 install(
   DIRECTORY launch src
   DESTINATION share/${PROJECT_NAME}
 )
+
+message(=============================================================)
+message("-- ROS Found. ROS Support is turned ON for graph_waypoints_creation.")
+message(=============================================================)
 
 ament_package()
