@@ -388,7 +388,7 @@ void local_path_planning_node::sampleLayersAlongPath()
             // marker_array.markers.push_back(marker);
         }
 
-        if (layer_idx >= 4) // Only process lateral offsets for layers after the first three
+        if (layer_idx >= 5) // Only process lateral offsets for layers after the first three
         {
             // for the lateral offset
             for (double lateral_offset = -lateral_range; lateral_offset <= lateral_range; lateral_offset += lateral_spacing)
@@ -1140,13 +1140,16 @@ void local_path_planning_node::map_combination(const obstacles_information_msgs:
                 double rotated_x = x * cos_heading - y * sin_heading;
                 double rotated_y = x * sin_heading + y * cos_heading;
 
-                int square_x = car_x_rescaled + static_cast<int>(rotated_x + 0.5); // Rounding to nearest grid cell
-                int square_y = car_y_rescaled + static_cast<int>(rotated_y + 0.5);
+                // Round and calculate final grid coordinates
+                int square_x = car_x_rescaled + static_cast<int>(std::round(rotated_x));
+                int square_y = car_y_rescaled + static_cast<int>(std::round(rotated_y));
 
+                // Check bounds to avoid out-of-grid access
                 if (square_x >= 0 && square_x < static_cast<int>(rescaled_chunk_->info.width) &&
                     square_y >= 0 && square_y < static_cast<int>(rescaled_chunk_->info.height))
                 {
-                    rescaled_chunk_->data[square_y * rescaled_chunk_->info.width + square_x] = 0; // Set to "white" (unknown)
+                    // Set to "white" (unknown)
+                    rescaled_chunk_->data[square_y * rescaled_chunk_->info.width + square_x] = 0;
                 }
             }
         }
