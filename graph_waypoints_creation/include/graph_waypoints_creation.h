@@ -12,6 +12,9 @@
 #include <tf2_ros/transform_listener.h>
 #include <tf2/LinearMath/Matrix3x3.h>
 
+#include <visualization_msgs/msg/marker.hpp>
+#include <visualization_msgs/msg/marker_array.hpp>
+
 #include <Eigen/Dense>
 
 // C++
@@ -55,6 +58,8 @@ private:
     void writeHeaderToFile();
     void writePoseToFile(const State &odom_pos_, bool change_flag);
     void pub_callback();
+    double computeDistance(const State &state1, const State &state2);
+    void displayMarker(const State &state_to_display);
 
     std::ofstream ofs_;
     std::string file_path_;

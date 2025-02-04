@@ -1,9 +1,0 @@
-/home/genis/Desktop/sdv_ws/src/Autonomous_dynamic_path_planning/build/graph_waypoints_creation/CMakeFiles/uninstall.dir
-/home/genis/Desktop/sdv_ws/src/Autonomous_dynamic_path_planning/build/graph_waypoints_creation/CMakeFiles/graph_waypoints_creation_uninstall.dir
-/home/genis/Desktop/sdv_ws/src/Autonomous_dynamic_path_planning/build/graph_waypoints_creation/CMakeFiles/test.dir
-/home/genis/Desktop/sdv_ws/src/Autonomous_dynamic_path_planning/build/graph_waypoints_creation/CMakeFiles/edit_cache.dir
-/home/genis/Desktop/sdv_ws/src/Autonomous_dynamic_path_planning/build/graph_waypoints_creation/CMakeFiles/rebuild_cache.dir
-/home/genis/Desktop/sdv_ws/src/Autonomous_dynamic_path_planning/build/graph_waypoints_creation/CMakeFiles/list_install_components.dir
-/home/genis/Desktop/sdv_ws/src/Autonomous_dynamic_path_planning/build/graph_waypoints_creation/CMakeFiles/install.dir
-/home/genis/Desktop/sdv_ws/src/Autonomous_dynamic_path_planning/build/graph_waypoints_creation/CMakeFiles/install/local.dir
-/home/genis/Desktop/sdv_ws/src/Autonomous_dynamic_path_planning/build/graph_waypoints_creation/CMakeFiles/install/strip.dir
