@@ -55,3 +55,18 @@ new launcher
 ```bash 
 ros2 launch global_dynamic_launcher rio_voxel_ground_cluster.launch.py
 ```
+
+
+```bash 
+git clone https://github.com/msteinbeck/tinyspline.git tinyspline
+cd tinyspline
+mkdir build
+cd build
+cmake -DTINYSPLINE_ENABLE_CPP=True -DTINYSPLINE_ENABLE_PYTHON=False -DTINYSPLINE_ENABLE_ALL_INTERFACES=False ..
+cmake --build . --target install
+link_directories(/usr/local/lib64)
+
+
+./test/c/tinyspline_tests
+./test/cxx/tinysplinecxx_tests
+```
