@@ -106,6 +106,9 @@ private:
     double FLAGS_proximity_weight = 2.7;      // Keeps path near reference unless obstacles force deviation
     double FLAGS_persistence_weight = 0.5;
 
+    // set from witch waypoint to start
+    size_t start_waypoint_idx = 2;
+
     // obstacle bool
     bool mode_obstacle = 1;
 

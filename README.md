@@ -24,9 +24,6 @@ sudo apt install ros-$ROS_DISTRO-grid-map-cv
 sudo apt install ros-$ROS_DISTRO-cv-bridge
 ```
 
-## → 🏅 lidar config 
-`sudo ifconfig enp2s0 10.66.171.101`
-
 ## → 📥 Building
 
 <img height="50" src="https://user-images.githubusercontent.com/25181517/192158606-7c2ef6bd-6e04-47cf-b5bc-da2797cb5bda.png">
@@ -44,18 +41,40 @@ colcon build --packages-select dynamic_hybrid_path_planning
 ```
 
 ## → 💡 Launch 
-```bash
-ros2 launch pointcloud_clustering pointcloud_clustering.launch.py
-ros2 launch trajectory_obstacle_checker trajectory_obstacle_checker.launch.py
-ros2 launch dynamic_hybrid_path_planning dynamic_planning.launch.py
-```
 
-new launcher 
-
+# Point Cloud and Obstacle Processing
 ```bash 
 ros2 launch global_dynamic_launcher rio_voxel_ground_cluster.launch.py
 ```
+# Local Planning
 
+```bash 
+ros2 launch local_path_planning local_planning.launch.py 
+```
+
+## Simulating Steering Input
+
+For path planning, the system expects a steering angle input in radians. You can simulate this by publishing a `Float64` message to the `/sdv/steering/position` topic. Use the following command in your terminal:
+
+```bash
+ros2 topic pub /sdv/steering/position std_msgs/msg/Float64 "{data: 0.5}"
+```
+
+*Note:* Adjust the value (e.g., `0.5`) as needed to simulate different steering angles.
+
+## Modifying Local Path Planning Behavior
+
+To make the car choose a different path, you can modify the behavior of the local path planning module by changing a specific variable. In the file `local_path_planning_node.h` located in the `local_path_planning` package, update the following variable:
+
+```cpp
+bool mode_obstacle = 1;
+```
+
+Changing the value of `mode_obstacle` creates a white box in the grid map, which instructs the system to ignore obstacles near the car. Adjust this setting as needed to test different planning scenarios.
+
+## Tinyspline Installation
+
+To install the tinyspline library (required for certain spline interpolation functionalities), run:
 
 ```bash 
 git clone https://github.com/msteinbeck/tinyspline.git tinyspline
@@ -64,9 +83,10 @@ mkdir build
 cd build
 cmake -DTINYSPLINE_ENABLE_CPP=True -DTINYSPLINE_ENABLE_PYTHON=False -DTINYSPLINE_ENABLE_ALL_INTERFACES=False ..
 cmake --build . --target install
-link_directories(/usr/local/lib64)
-
 
 ./test/c/tinyspline_tests
 ./test/cxx/tinysplinecxx_tests
 ```
+
+
+

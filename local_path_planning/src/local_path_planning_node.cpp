@@ -357,38 +357,16 @@ void local_path_planning_node::sampleLayersAlongPath()
                 min_cost = 0.0; // Initial layer has no predecessor
             }
 
-            // Set cost to 0 for the first three layers
-            if (layer_idx < 4)
+            if (layer_idx < start_waypoint_idx)
             {
                 min_cost = 0.0;
             }
 
             layer_costs.push_back(min_cost);
             layer_predecessors.push_back(best_predecessor);
-
-            // Create a marker for this point
-            // visualization_msgs::msg::Marker marker;
-            // marker.header.frame_id = "map"; // Set appropriate frame ID
-            // marker.header.stamp = rclcpp::Clock().now();
-            // marker.ns = "sampled_points";
-            // marker.id = marker_id++;
-            // marker.type = visualization_msgs::msg::Marker::SPHERE;
-            // marker.action = visualization_msgs::msg::Marker::ADD;
-            // marker.pose.position.x = center_point(0);
-            // marker.pose.position.y = center_point(1);
-            // marker.pose.position.z = 0.0; // Adjust if needed
-            // marker.scale.x = 0.4;         // Diameter of the sphere
-            // marker.scale.y = 0.4;
-            // marker.scale.z = 0.4;
-            // marker.color.a = 1.0; // Alpha (1.0 is fully opaque)
-            // marker.color.r = 0.0; // Customize color as desired
-            // marker.color.g = 1.0;
-            // marker.color.b = 0.0;
-            // marker.lifetime = rclcpp::Duration(0, 0); // Persistent markers
-            // marker_array.markers.push_back(marker);
         }
 
-        if (layer_idx >= 5) // Only process lateral offsets for layers after the first three
+        if (layer_idx >= start_waypoint_idx)
         {
             // for the lateral offset
             for (double lateral_offset = -lateral_range; lateral_offset <= lateral_range; lateral_offset += lateral_spacing)
@@ -444,27 +422,6 @@ void local_path_planning_node::sampleLayersAlongPath()
 
                     layer_costs.push_back(min_cost);
                     layer_predecessors.push_back(best_predecessor);
-
-                    // Create a marker for this point
-                    // visualization_msgs::msg::Marker marker;
-                    // marker.header.frame_id = "map"; // Set appropriate frame ID
-                    // marker.header.stamp = rclcpp::Clock().now();
-                    // marker.ns = "sampled_points";
-                    // marker.id = marker_id++;
-                    // marker.type = visualization_msgs::msg::Marker::SPHERE;
-                    // marker.action = visualization_msgs::msg::Marker::ADD;
-                    // marker.pose.position.x = sample_point(0);
-                    // marker.pose.position.y = sample_point(1);
-                    // marker.pose.position.z = 0.0; // Adjust if needed
-                    // marker.scale.x = 0.4;         // Diameter of the sphere
-                    // marker.scale.y = 0.4;
-                    // marker.scale.z = 0.4;
-                    // marker.color.a = 1.0; // Alpha (1.0 is fully opaque)
-                    // marker.color.r = 0.0; // Customize color as desired
-                    // marker.color.g = 1.0;
-                    // marker.color.b = 0.0;
-                    // marker.lifetime = rclcpp::Duration(0, 0); // Persistent markers
-                    // marker_array.markers.push_back(marker);
                 }
             }
         }
@@ -478,25 +435,6 @@ void local_path_planning_node::sampleLayersAlongPath()
             predecessors.push_back(layer_predecessors);
         }
     }
-
-    // ========================================================================================================
-    // debug
-
-    // cout waypoints_segmentation size
-    // std::cout << green << "waypoints_segmentation size: " << waypoints_segmentation->size() << reset << std::endl;
-    // std::cout << green << "---> Number of layers: " << layers_samples.size() << reset << std::endl;
-
-    // // add the points of the layers sample and cout out them
-    // int layer_points_count = 0;
-    // for (const auto &layer : layers_samples)
-    // {
-    //     layer_points_count += layer.size();
-    // }
-
-    // // cout the layer points count
-    // std::cout << green << "---> Layer points count: " << layer_points_count << reset << std::endl;
-
-    // ========================================================================================================
 
     // Retrieve optimal path by backtracking from the final layer
     optimal_path->clear();
@@ -527,34 +465,6 @@ void local_path_planning_node::sampleLayersAlongPath()
         std::reverse(optimal_path->begin(), optimal_path->end());
     }
 
-    // Publish add the optimal path to the marker array
-    // for (size_t i = 0; i < optimal_path->size(); ++i)
-    // {
-    //     visualization_msgs::msg::Marker marker;
-    //     marker.header.frame_id = "map"; // Set appropriate frame ID
-    //     marker.header.stamp = rclcpp::Clock().now();
-    //     marker.ns = "optimal_path";
-    //     marker.id = marker_id++;
-    //     marker.type = visualization_msgs::msg::Marker::SPHERE;
-    //     marker.action = visualization_msgs::msg::Marker::ADD;
-    //     marker.pose.position.x = optimal_path->at(i)(0);
-    //     marker.pose.position.y = optimal_path->at(i)(1);
-    //     marker.pose.position.z = 0.0; // Adjust if needed
-    //     marker.scale.x = 0.5;         // Diameter of the sphere
-    //     marker.scale.y = 0.5;
-    //     marker.scale.z = 0.5;
-    //     marker.color.a = 1.0; // Alpha (1.0 is fully opaque)
-    //     marker.color.r = 1.0; // Customize color as desired
-    //     marker.color.g = 0.0;
-    //     marker.color.b = 0.0;
-    //     marker.lifetime = rclcpp::Duration(0, 0); // Persistent markers
-    //     marker_array.markers.push_back(marker);
-    // }
-
-    // Publish markers for the sampled points
-    // crosswalk_marker_publisher_->publish(marker_array);
-
-    // Compute the split path from the optimal path
     computeSplitpath();
 }
 
@@ -628,28 +538,6 @@ void local_path_planning_node::computeSplitpath()
         std::cout << red << "---> obstacle near the car. Skipt creating a path" << reset << std::endl;
         return;
     }
-
-    // check ifthe distance btw the last waypoint of result and the car (car_state_) is less than 4m is return, because the path is to short
-    // double total_length = 0.0;
-
-    // for (size_t i = 0; i + 3 < result.size(); i += 2)
-    // {
-    //     double x1 = result[i];
-    //     double y1 = result[i + 1];
-    //     double x2 = result[i + 2];
-    //     double y2 = result[i + 3];
-
-    //     total_length += sqrt(pow(x2 - x1, 2) + pow(y2 - y1, 2));
-    // }
-
-    // cout << yellow << "---> Total path length: " << total_length << reset << endl;
-
-    // // If the total length of the path is less than 4m, return
-    // if (total_length < 3.0)
-    // {
-    //     std::cout << red << "---> Total path length is less than 4m. Skipping path creation." << reset << std::endl;
-    //     return;
-    // }
 
     // ========================================================================================================
     // check collision with the interpolated path to create a real path
@@ -859,6 +747,19 @@ double local_path_planning_node::computeCost(const Eigen::VectorXd &point, const
     {
         obstacle_cost = (safety_distance - obstacle_distance) / safety_distance * FLAGS_search_obstacle_cost;
     }
+
+    // check this improvement
+    // if (obstacle_distance < safety_distance)
+    // {
+    //     if (obstacle_distance < 0.5)
+    //     { // Too close, definite collision
+    //         collision_cost = std::numeric_limits<double>::max();
+    //     }
+    //     else
+    //     {
+    //         collision_cost = (safety_distance - obstacle_distance) * FLAGS_search_obstacle_cost;
+    //     }
+    // }
 
     // Deviation cost (penalizes lateral deviation from the previous point)
     double offset_cost = fabs(point(1) - prev_point(1)) / FLAGS_search_lateral_range * FLAGS_search_deviation_cost;

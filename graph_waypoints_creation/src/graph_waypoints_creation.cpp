@@ -5,7 +5,7 @@ graph_waypoints_creation::graph_waypoints_creation(/* args */) : Node("graph_way
 {
 
     timer_ = this->create_wall_timer(std::chrono::milliseconds(200), std::bind(&graph_waypoints_creation::pub_callback, this));
-    waypoint_saver_pub_ = this->create_publisher<visualization_msgs::msg::MarkerArray>("waypoints", 10);
+    waypoint_saver_pub_ = this->create_publisher<visualization_msgs::msg::MarkerArray>("waypoints_creation", 10);
     waypoint_info_pub_ = this->create_publisher<visualization_msgs::msg::MarkerArray>("waypoints_info", 10);
 
     car_state_ = std::make_shared<State>();
